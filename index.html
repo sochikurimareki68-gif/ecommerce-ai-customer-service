@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>优眠家居 - AI智能客服</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f0f2f5; height: 100vh; display: flex; justify-content: center; align-items: center; }
+  .chat-container { width: 420px; height: 700px; background: #fff; border-radius: 16px; box-shadow: 0 8px 32px rgba(0,0,0,0.12); display: flex; flex-direction: column; overflow: hidden; }
+  .chat-header { background: linear-gradient(135deg, #4a90d9, #357abd); color: #fff; padding: 18px 24px; display: flex; align-items: center; gap: 12px; }
+  .chat-header .avatar { width: 44px; height: 44px; background: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 22px; }
+  .chat-header .info h1 { font-size: 16px; font-weight: 600; }
+  .chat-header .info p { font-size: 12px; opacity: 0.85; }
+  .chat-header .status { width: 8px; height: 8px; background: #52c41a; border-radius: 50%; margin-left: auto; }
+  .chat-messages { flex: 1; overflow-y: auto; padding: 16px 20px; background: #f5f5f7; }
+  .chat-messages::-webkit-scrollbar { width: 4px; }
+  .chat-messages::-webkit-scrollbar-thumb { background: #ccc; border-radius: 2px; }
+  .message { margin-bottom: 16px; display: flex; flex-direction: column; }
+  .message.bot { align-items: flex-start; }
+  .message.user { align-items: flex-end; }
+  .message .bubble { max-width: 75%; padding: 12px 16px; border-radius: 16px; font-size: 14px; line-height: 1.6; }
+  .message.bot .bubble { background: #fff; color: #1d1d1f; border: 1px solid #e8e8e8; border-bottom-left-radius: 4px; }
+  .message.user .bubble { background: #4a90d9; color: #fff; border-bottom-right-radius: 4px; }
+  .message .time { font-size: 11px; color: #999; margin-top: 4px; }
+  .quick-replies { padding: 8px 20px; display: flex; gap: 8px; flex-wrap: wrap; background: #fff; border-top: 1px solid #f0f0f0; }
+  .quick-reply { padding: 6px 14px; background: #f0f5ff; color: #4a90d9; border-radius: 16px; font-size: 13px; cursor: pointer; border: 1px solid #d6e4ff; transition: all 0.2s; }
+  .quick-reply:hover { background: #d6e4ff; }
+  .chat-input { padding: 12px 16px; background: #fff; border-top: 1px solid #f0f0f0; display: flex; gap: 8px; }
+  .chat-input input { flex: 1; padding: 10px 16px; border: 1px solid #e8e8e8; border-radius: 20px; font-size: 14px; outline: none; transition: border-color 0.2s; }
+  .chat-input input:focus { border-color: #4a90d9; }
+  .chat-input button { width: 40px; height: 40px; background: #4a90d9; color: #fff; border: none; border-radius: 50%; cursor: pointer; font-size: 18px; display: flex; align-items: center; justify-content: center; transition: background 0.2s; }
+  .chat-input button:hover { background: #357abd; }
+  .typing { display: inline-flex; gap: 4px; }
+  .typing span { width: 8px; height: 8px; background: #ccc; border-radius: 50%; animation: blink 1.4s infinite both; }
+  .typing span:nth-child(2) { animation-delay: 0.2s; }
+  .typing span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
+</style>
+</head>
+<body>
+
+<div class="chat-container">
+  <!-- 头部 -->
+  <div class="chat-header">
+    <div class="avatar">🛏️</div>
+    <div class="info">
+      <h1>优眠小助手</h1>
+      <p>智能客服 · 在线</p>
+    </div>
+    <div class="status"></div>
+  </div>
+
+  <!-- 消息区 -->
+  <div class="chat-messages" id="messages">
+    <div class="message bot">
+      <div class="bubble">亲，您好！😊 欢迎来到优眠家居，我是智能客服小助手。我可以帮您解答商品信息、洗护方式、发货物流、退换货等问题。请问有什么可以帮您的呢？</div>
+      <div class="time" id="welcome-time"></div>
+    </div>
+  </div>
+
+  <!-- 快捷回复 -->
+  <div class="quick-replies" id="quickReplies">
+    <span class="quick-reply" onclick="sendQuick('四件套有哪些尺寸？')">四件套尺寸</span>
+    <span class="quick-reply" onclick="sendQuick('纯棉床品怎么洗？')">洗护方式</span>
+    <span class="quick-reply" onclick="sendQuick('多久能发货？')">发货时效</span>
+    <span class="quick-reply" onclick="sendQuick('退货流程是什么？')">退换货</span>
+  </div>
+
+  <!-- 输入区 -->
+  <div class="chat-input">
+    <input type="text" id="input" placeholder="输入您的问题..." onkeypress="if(event.key==='Enter') sendMessage()">
+    <button onclick="sendMessage()">→</button>
+  </div>
+</div>
+
+<script>
+  // ==========================================
+  //  优眠家居 AI 智能客服 - 前端页面
+  //  使用方式：
+  //  方案A：将 Coze Bot 分享链接填入 cozeBotUrl，用 iframe 嵌入
+  //  方案B：填入 Coze API 信息，通过 API 调用（需要后端代理或CORS配置）
+  // ==========================================
+
+  // TODO: 替换为你的 Coze Bot 分享链接或 API 配置
+  const COZE_BOT_URL = 'YOUR_COZE_BOT_SHARE_URL';  // Coze 发布后获取
+  const COZE_API_URL = '';      // 如使用 API 方式，填入 API 地址
+  const COZE_API_TOKEN = '';    // 如使用 API 方式，填入 access token
+
+  // 获取时间
+  function getTime() {
+    const now = new Date();
+    return now.getHours().toString().padStart(2,'0') + ':' + now.getMinutes().toString().padStart(2,'0');
+  }
+  document.getElementById('welcome-time').textContent = getTime();
+
+  // 发送快捷回复
+  function sendQuick(text) {
+    document.getElementById('input').value = text;
+    sendMessage();
+  }
+
+  // 发送消息
+  function sendMessage() {
+    const input = document.getElementById('input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    // 显示用户消息
+    addMessage(text, 'user');
+    input.value = '';
+
+    // 显示"正在输入"动画
+    const typingId = showTyping();
+
+    // 调用 Coze API 或模拟回复
+    setTimeout(() => {
+      removeTyping(typingId);
+      callCoze(text);
+    }, 800);
+  }
+
+  // 调用 Coze
+  async function callCoze(userMessage) {
+    // 方案A：如果你在 Coze 发布了 Bot，可以直接用 iframe 方式
+    // 这里用模拟回复演示，实际使用时替换为真实 API 调用
+
+    if (COZE_API_URL && COZE_API_TOKEN) {
+      // 方案B：通过 Coze API 调用
+      try {
+        const response = await fetch(COZE_API_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + COZE_API_TOKEN
+          },
+          body: JSON.stringify({
+            bot_id: 'YOUR_BOT_ID',
+            user_id: 'user_001',
+            message: userMessage,
+            stream: false
+          })
+        });
+        const data = await response.json();
+        addMessage(data.data.content || data.message, 'bot');
+      } catch (error) {
+        addMessage('抱歉，系统暂时无法连接，请稍后再试或拨打客服热线 400-XXX-XXXX。', 'bot');
+      }
+    } else {
+      // 模拟回复（开发阶段演示用）
+      addMessage(getMockReply(userMessage), 'bot');
+    }
+  }
+
+  // 模拟回复（开发阶段演示用，实际接入 Coze 后删除）
+  function getMockReply(message) {
+    const replies = {
+      '尺寸': '亲，我们的四件套规格如下：\n• 1.2米床：被套150×200cm\n• 1.5米床：被套200×230cm\n• 1.8米床：被套220×240cm\n购买时请根据床垫尺寸选择对应规格哦~ 😊',
+      '洗': '亲，纯棉床品的洗护建议：\n• 水温不超过40度\n• 使用中性洗涤剂\n• 轻柔模式机洗\n• 反面晾晒，避免暴晒\n建议每1-2周更换清洗一次 🛏️',
+      '发货': '亲，我们的发货时效：\n• 现货商品：下单后48小时内发货（工作日）\n• 预售商品：7-15天发货\n• 大促期间：可能延迟至72小时\n发货后会短信通知快递单号哦~ 📦',
+      '退货': '亲，退换货流程：\n1. 订单页点击"申请售后"\n2. 填写原因并上传照片\n3. 客服审核（2小时内）\n4. 寄回商品，填写快递单号\n5. 签收验货后1-3天退款\n如需帮助随时告诉我~ 😊'
+    };
+
+    for (let key in replies) {
+      if (message.includes(key)) return replies[key];
+    }
+
+    return '亲，这个问题我需要帮您转接人工客服确认一下，您稍等哦~ 您也可以拨打客服热线 400-XXX-XXXX（工作日9:00-18:00）😊';
+  }
+
+  // 添加消息到聊天区
+  function addMessage(text, sender) {
+    const messages = document.getElementById('messages');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message ' + sender;
+    msgDiv.innerHTML = '<div class="bubble">' + text.replace(/\n/g, '<br>') + '</div><div class="time">' + getTime() + '</div>';
+    messages.appendChild(msgDiv);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  // 显示"正在输入"
+  function showTyping() {
+    const messages = document.getElementById('messages');
+    const id = 'typing-' + Date.now();
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message bot';
+    msgDiv.id = id;
+    msgDiv.innerHTML = '<div class="bubble"><div class="typing"><span></span><span></span><span></span></div></div>';
+    messages.appendChild(msgDiv);
+    messages.scrollTop = messages.scrollHeight;
+    return id;
+  }
+
+  // 移除"正在输入"
+  function removeTyping(id) {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+  }
+</script>
+
+</body>
+</html>

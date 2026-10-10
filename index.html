@@ -55,10 +55,10 @@
     <div class="status"></div>
   </div>
 
-  <!-- 在线体验入口 -->
+  <!-- 在线体验入口（跳转扣子智能体） -->
   <div class="online-bar">
     <span>本页为界面演示，完整 AI 能力由扣子智能体提供</span>
-    <a id="cozeLink" href="#" target="_blank" rel="noopener">在线体验 →</a>
+    <a href="https://www.coze.cn/store/agent/7694865098007035940" target="_blank" rel="noopener">在线体验 →</a>
   </div>
 
   <!-- 消息区 -->
@@ -95,12 +95,9 @@
   // ==========================================
 
   // TODO: 替换为你的 Coze Bot 分享链接或 API 配置
-  const COZE_BOT_URL = 'https://www.coze.cn/store/agent/7694865098007035940?bot_id=true';  // Coze 发布后获取
+  const COZE_BOT_URL = '';      // Coze 发布后获取
   const COZE_API_URL = '';      // 如使用 API 方式，填入 API 地址
   const COZE_API_TOKEN = '';    // 如使用 API 方式，填入 access token
-
-  // 在线体验入口指向 Coze 分享链接
-  document.getElementById('cozeLink').href = COZE_BOT_URL;
 
   // 获取时间
   function getTime() {
@@ -211,6 +208,44 @@
   function removeTyping(id) {
     const el = document.getElementById(id);
     if (el) el.remove();
+  }
+</script>
+
+<!-- ==========================================================
+     Coze Chat SDK 接入（页面右下角悬浮聊天窗口）
+     使用步骤：
+       1. 打开 https://www.coze.cn/open 创建 PAT 个人访问令牌
+       2. 把下方 COZE_PAT_TOKEN 替换为你的令牌（pat_ 开头）
+       3. 刷新页面，右下角出现聊天按钮，即可与"优眠小助手"真实对话
+
+     ⚠️ 令牌属于敏感信息！
+        填好后仅用于本地演示/录屏；
+        推送到 GitHub 之前，务必把令牌改回空字符串 ''
+     ========================================================== -->
+<script>
+  // 本地演示用：填入你的扣子 PAT 令牌（pat_ 开头），右下角会出现真实聊天窗口
+  // 提交到 GitHub 时必须保持为空字符串 ''——网页源码公开，令牌会被他人看到
+  window.COZE_PAT_TOKEN = '';
+</script>
+<script src="https://lf-cdn.coze.cn/obj/unpkg/flow-platform/chat-app-sdk/1.2.0-beta.19/libs/cn/index.js"></script>
+<script>
+  // 仅在填入令牌时加载真实聊天窗口，避免公开部署时泄露密钥
+  if (window.COZE_PAT_TOKEN && window.COZE_PAT_TOKEN.length > 10) {
+    new CozeWebSDK.WebChatClient({
+      config: {
+        bot_id: '7694865098007035940',
+      },
+      componentProps: {
+        title: '优眠小助手',
+      },
+      auth: {
+        type: 'token',
+        token: window.COZE_PAT_TOKEN,
+        onRefreshToken: function () {
+          return window.COZE_PAT_TOKEN;
+        }
+      }
+    });
   }
 </script>
 

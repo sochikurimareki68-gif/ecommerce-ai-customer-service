@@ -4,9 +4,11 @@
 
 ## 在线体验
 
-- 扣子智能体：[点击体验](https://www.coze.cn/store/agent/7694865098007035940?bot_id=true)
-- GitHub Pages：[点击访问](https://sochikurimareki68-gif.github.io/ecommerce-ai-customer-service)
-- 演示视频：[B站链接](替换为实际链接)
+- 扣子智能体：[点击体验](https://www.coze.cn/store/agent/7694865098007035940)
+- 界面演示：[GitHub Pages](https://sochikurimareki68-gif.github.io/ecommerce-ai-customer-service)
+- 演示视频：待补充
+
+> 前端页面为界面原型演示，完整 AI 能力由扣子智能体提供。出于密钥安全考虑，公开网页未直连 API，请点击"在线体验"跳转扣子使用。
 
 ## 功能
 
@@ -70,6 +72,12 @@ ecommerce-ai-customer-service/
 5. 测试 25 组对话用例，覆盖六大意图，记录 BadCase 并优化
 6. 编写 HTML 前端页面，提供在线体验入口
 7. 发布智能体并部署到 GitHub Pages
+
+## 后续规划（Roadmap）
+
+- **v1.1 对话流重构**：将现有工作流（无状态、一次性执行）迁移为对话流，获得原生多轮记忆、流程中反问用户、流式输出能力
+- **v1.2 后端代理**：搭建轻量后端中转扣子 API，让公开网页可安全直连智能体，无需在前端暴露密钥
+- **v1.3 效果评测**：补充评测数据集与自动化回归测试，量化意图路由准确率与回复质量
 
 ## 作者
 

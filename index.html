@@ -36,6 +36,10 @@
   .typing span:nth-child(2) { animation-delay: 0.2s; }
   .typing span:nth-child(3) { animation-delay: 0.4s; }
   @keyframes blink { 0%, 80%, 100% { opacity: 0.3; } 40% { opacity: 1; } }
+  .online-bar { background: #fffbe6; border-bottom: 1px solid #ffe58f; padding: 8px 20px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .online-bar span { font-size: 12px; color: #856404; }
+  .online-bar a { padding: 4px 12px; background: #4a90d9; color: #fff; border-radius: 12px; font-size: 12px; text-decoration: none; white-space: nowrap; }
+  .online-bar a:hover { background: #357abd; }
 </style>
 </head>
 <body>
@@ -51,6 +55,12 @@
     <div class="status"></div>
   </div>
 
+  <!-- 在线体验入口 -->
+  <div class="online-bar">
+    <span>本页为界面演示，完整 AI 能力由扣子智能体提供</span>
+    <a id="cozeLink" href="#" target="_blank" rel="noopener">在线体验 →</a>
+  </div>
+
   <!-- 消息区 -->
   <div class="chat-messages" id="messages">
     <div class="message bot">
@@ -61,10 +71,12 @@
 
   <!-- 快捷回复 -->
   <div class="quick-replies" id="quickReplies">
-    <span class="quick-reply" onclick="sendQuick('四件套有哪些尺寸？')">四件套尺寸</span>
+    <span class="quick-reply" onclick="sendQuick('四件套有哪些尺寸？')">商品咨询</span>
     <span class="quick-reply" onclick="sendQuick('纯棉床品怎么洗？')">洗护方式</span>
     <span class="quick-reply" onclick="sendQuick('多久能发货？')">发货时效</span>
     <span class="quick-reply" onclick="sendQuick('退货流程是什么？')">退换货</span>
+    <span class="quick-reply" onclick="sendQuick('现在有什么优惠活动？')">优惠活动</span>
+    <span class="quick-reply" onclick="sendQuick('转人工客服')">转人工</span>
   </div>
 
   <!-- 输入区 -->
@@ -83,9 +95,12 @@
   // ==========================================
 
   // TODO: 替换为你的 Coze Bot 分享链接或 API 配置
-  const COZE_BOT_URL = 'YOUR_COZE_BOT_SHARE_URL';  // Coze 发布后获取
+  const COZE_BOT_URL = 'https://www.coze.cn/store/agent/7694865098007035940?bot_id=true';  // Coze 发布后获取
   const COZE_API_URL = '';      // 如使用 API 方式，填入 API 地址
   const COZE_API_TOKEN = '';    // 如使用 API 方式，填入 access token
+
+  // 在线体验入口指向 Coze 分享链接
+  document.getElementById('cozeLink').href = COZE_BOT_URL;
 
   // 获取时间
   function getTime() {
@@ -158,7 +173,8 @@
       '尺寸': '亲，我们的四件套规格如下：\n• 1.2米床：被套150×200cm\n• 1.5米床：被套200×230cm\n• 1.8米床：被套220×240cm\n购买时请根据床垫尺寸选择对应规格哦~ 😊',
       '洗': '亲，纯棉床品的洗护建议：\n• 水温不超过40度\n• 使用中性洗涤剂\n• 轻柔模式机洗\n• 反面晾晒，避免暴晒\n建议每1-2周更换清洗一次 🛏️',
       '发货': '亲，我们的发货时效：\n• 现货商品：下单后48小时内发货（工作日）\n• 预售商品：7-15天发货\n• 大促期间：可能延迟至72小时\n发货后会短信通知快递单号哦~ 📦',
-      '退货': '亲，退换货流程：\n1. 订单页点击"申请售后"\n2. 填写原因并上传照片\n3. 客服审核（2小时内）\n4. 寄回商品，填写快递单号\n5. 签收验货后1-3天退款\n如需帮助随时告诉我~ 😊'
+      '退货': '亲，退换货流程：\n1. 订单页点击"申请售后"\n2. 填写原因并上传照片\n3. 客服审核（2小时内）\n4. 寄回商品，填写快递单号\n5. 签收验货后1-3天退款\n如需帮助随时告诉我~ 😊',
+      '优惠': '亲，当前优惠活动：\n• 满199减20 / 满299减40 / 满399减60\n• 满减可与优惠券叠加使用\n• 关注店铺可领专属优惠券\n您可以前往店铺活动页查看更多详情哦~ 🎁'
     };
 
     for (let key in replies) {

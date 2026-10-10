@@ -83,4 +83,4 @@ ecommerce-ai-customer-service/
 
 ## 作者
 
-许民德 — AI 应用工程师
+[sochikurimareki68-gif](https://github.com/sochikurimareki68-gif)

@@ -2,13 +2,13 @@
 
 > 基于扣子 Coze 搭建的电商智能客服智能体，通过**六路条件判断工作流**按用户意图路由，结合 FAQ 知识库与商品目录，实现商品咨询、洗护指南、物流发货、退换售后、优惠活动等场景的自动应答。
 
-## 在线体验
+## 项目链接
 
-- 扣子智能体：[点击体验](https://www.coze.cn/store/agent/7694865098007035940)
+- GitHub 仓库：[ecommerce-ai-customer-service](https://github.com/sochikurimareki68-gif/ecommerce-ai-customer-service)
 - 界面演示：[GitHub Pages](https://sochikurimareki68-gif.github.io/ecommerce-ai-customer-service)
 - 演示视频：待补充
 
-> 前端页面为界面原型演示，完整 AI 能力由扣子智能体提供。出于密钥安全考虑，公开网页未直连 API，请点击"在线体验"跳转扣子使用。
+> 智能体运行在扣子 Coze 平台，需在扣子账号内搭建使用。本仓库提供完整的人设 Prompt、知识库、工作流设计与测试用例，可按文档复现。
 
 ## 功能
 
@@ -53,7 +53,7 @@
 
 ```
 ecommerce-ai-customer-service/
-├── index.html                  # 前端聊天页面（界面演示 + 在线体验入口）
+├── index.html                  # 前端聊天页面（界面演示 + 源码入口）
 ├── docs/
 │   ├── prompt-template.md      # 人设 Prompt 模板（11个模块）
 │   ├── faq-knowledge-base.md   # FAQ 知识库（50条，6大类）
@@ -71,7 +71,7 @@ ecommerce-ai-customer-service/
 3. 设计六路条件判断工作流：意图识别 → 六条分支 → 代码合并 → 返回
 4. 配置变量与多轮对话，设置消息处理优先级
 5. 测试 25 组对话用例，覆盖六大意图，记录 BadCase 并优化
-6. 编写 HTML 前端页面，提供在线体验入口
+6. 编写 HTML 前端页面，提供界面演示与源码入口
 7. 发布智能体并部署到 GitHub Pages
 
 ## 后续规划（Roadmap）

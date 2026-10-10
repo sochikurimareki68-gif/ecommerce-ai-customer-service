@@ -59,7 +59,8 @@ ecommerce-ai-customer-service/
 │   ├── faq-knowledge-base.md   # FAQ 知识库（50条，6大类）
 │   ├── product-catalog.md      # 商品目录与价格表（20款）
 │   ├── workflow-design.md      # 六路条件判断工作流设计
-│   └── test-cases.md           # 测试用例（25组）
+│   ├── test-cases.md           # 测试用例（25组）
+│   └── integration-plan-v2.md  # v2.0 对接真实店铺方案（物流/人工/知识库同步）
 └── README.md
 ```
 
@@ -75,6 +76,7 @@ ecommerce-ai-customer-service/
 
 ## 后续规划（Roadmap）
 
+- **v2.0 对接真实店铺**：新增后端服务与扣子自定义插件，实现物流实时查询、真实人工客服、商品知识库自动同步。详细方案见 [对接方案文档](docs/integration-plan-v2.md)
 - **v1.1 对话流重构**：将现有工作流（无状态、一次性执行）迁移为对话流，获得原生多轮记忆、流程中反问用户、流式输出能力
 - **v1.2 后端代理**：搭建轻量后端中转扣子 API，让公开网页可安全直连智能体，无需在前端暴露密钥
 - **v1.3 效果评测**：补充评测数据集与自动化回归测试，量化意图路由准确率与回复质量

@@ -17,6 +17,7 @@
 - **原生多轮对话**：对话流绑定会话，模型节点可读取历史消息，多轮追问无需手工补全上下文
 - **分级消息处理**：问候语/转人工/结束语直接回复，业务咨询走对话流，异常走安全兜底
 - **安全兜底**：无法回答时礼貌引导转人工，不编造答案、不冒充人工客服
+- **可在线试用**：经后端代理与真实智能体流式对话，前端不暴露任何密钥
 
 ## 对话流架构
 
@@ -51,13 +52,19 @@
 - 知识库：RAG 检索增强（文本知识库，按需调用）
 - 模型：豆包 2.0 pro
 - 前端：HTML / CSS / JavaScript
-- 部署：GitHub Pages
+- 后端：Python 3 标准库（`http.server` + `urllib`，零第三方依赖）
+- 部署：GitHub Pages（静态演示）+ 任意 Python 托管平台（真实对话）
 
 ## 项目结构
 
 ```
 ecommerce-ai-customer-service/
-├── index.html                  # 前端聊天页面（界面演示 + 源码入口）
+├── index.html                  # 前端聊天页面（有后端时真实对话，无后端时降级为界面演示）
+├── server.py                   # 轻量后端代理（Python 标准库，零依赖）
+├── render.yaml                 # Render 部署蓝图
+├── Procfile                    # 通用启动命令（Render / Railway / Heroku 系）
+├── requirements.txt            # 声明无第三方依赖
+├── .env.example                # 环境变量示例（复制为 .env 并填写令牌）
 ├── docs/
 │   ├── prompt-template.md      # 人设 Prompt 模板（7个模块）
 │   ├── faq-knowledge-base.md   # FAQ 知识库（50条，6大类）
@@ -68,6 +75,84 @@ ecommerce-ai-customer-service/
 └── README.md
 ```
 
+## 本地运行（真实对话）
+
+前端不保存任何令牌；令牌只存在服务端 `.env` 里，由后端代理转发请求。
+
+```bash
+# 1. 配置令牌（pat_ 开头，需勾选 Chat 权限）
+cp .env.example .env        # 然后编辑 .env，填入 COZE_API_TOKEN
+
+# 2. 启动服务（零第三方依赖，只用 Python 标准库）
+python3 server.py
+
+# 3. 打开页面
+open http://localhost:3000
+```
+
+`server.py` 同时承担两件事：托管静态页面 + 提供 `POST /api/chat` 流式转发扣子接口。
+页面加载时会探测 `/api/health`——探测成功走真实对话，失败（例如部署在 GitHub Pages）则自动降级为内置模拟回复的界面演示。
+
+### 为什么需要后端代理
+
+扣子 API 调用需要携带个人访问令牌（PAT）。如果把令牌写进网页源码，任何访客打开开发者工具都能抄走，
+等于把账号交出去。所以令牌只放在服务端，浏览器只与本服务通信。
+
+> 想让别人在线试用，把本仓库部署到任意支持 Python 的托管平台（如 Render / Railway / Fly.io），
+> 在平台的环境变量中配置 `COZE_API_TOKEN` 即可。GitHub Pages 只能托管静态文件，跑不了后端。
+
+## 部署到公网（让别人能访问）
+
+GitHub Pages 只能托管静态文件，跑不了后端，所以**真实对话必须部署到支持 Python 的平台**。
+下面以 Render 为例（免费、步骤最少，仓库里已经放好 `render.yaml`）。
+
+### 方式一：Render（推荐）
+
+1. 把本仓库推送到 GitHub（`.env` 已被 `.gitignore` 忽略，不会被提交）
+2. 打开 [dashboard.render.com](https://dashboard.render.com) → **New** → **Blueprint**
+3. 选择本仓库，Render 会自动读取根目录的 `render.yaml`
+4. 在弹出的环境变量处填写 `COZE_API_TOKEN`（`pat_` 开头，需勾选 Chat 权限）
+5. 点 **Apply**，等待首次构建完成（约 2-3 分钟）
+6. 得到形如 `https://youmian-customer-service.onrender.com` 的地址——把它发给别人即可直接对话
+
+注意事项：
+
+- **免费版会休眠**：15 分钟无访问后实例休眠，下次访问需要约 1 分钟唤醒。面试前先自己打开预热一次
+- **区域**：`render.yaml` 里设了 `singapore`（离国内最近）。若提示区域不可用，删掉那一行用默认区域即可
+- **令牌安全**：只填在 Render 控制台的 Environment 里，永远不要写进代码或提交到仓库
+
+### 方式二：其他平台
+
+本项目没有第三方依赖、启动命令固定，任何能跑 Python 的平台都能部署：
+
+| 平台 | 启动命令 | 必须配置 |
+|------|---------|---------|
+| Render | `python server.py` | `COZE_API_TOKEN` |
+| Railway | 同左（已提供 `Procfile`，可自动识别） | `COZE_API_TOKEN` |
+| Fly.io | 同左 | `COZE_API_TOKEN` |
+| 阿里云函数计算 / 腾讯云 CloudBase | 同左 | `COZE_API_TOKEN` |
+
+通用要求只有三条：
+
+1. 启动命令 `python server.py`
+2. 监听端口读环境变量 `PORT`（`server.py` 已支持），绑定 `0.0.0.0`（默认已是）
+3. 环境变量里配置 `COZE_API_TOKEN`，可选 `COZE_BOT_ID` / `COZE_API_BASE`
+
+### 部署后自检
+
+打开 `https://你的域名/api/health`，应返回：
+
+```json
+{"ok": true, "bot_id": "7694865098007035940", "api_base": "https://api.coze.cn", "token_ready": true}
+```
+
+`token_ready` 为 `false` 说明环境变量没配上；`ok` 都拿不到说明服务没起来。
+
+### GitHub Pages 静态演示仍然有效
+
+部署后端**不影响**原来的 GitHub Pages 页面——同一个 `index.html` 会先探测 `/api/health`：
+探到后端就走真实对话，探不到就自动降级为内置模拟回复的界面演示。所以两处可以同时存在。
+
 ## 实施步骤
 
 1. 在扣子创建智能体，配置人设 Prompt（角色/语气/处理规则/禁答范围等）
@@ -75,17 +160,18 @@ ecommerce-ai-customer-service/
 3. 创建六路条件判断对话流：意图识别 → 六条分支 → 代码合并 → 返回
 4. 将对话流绑定到智能体，配置消息处理规则与开场白
 5. 测试 25 组对话用例，覆盖六大意图，记录 BadCase 并优化
-6. 编写 HTML 前端页面，提供界面演示与源码入口
-7. 部署到 GitHub Pages
+6. 编写 HTML 前端页面，并在页面内提供源码入口
+7. 用 Python 标准库实现后端代理（`server.py`），令牌只留在服务端
+8. 部署：静态页面发到 GitHub Pages；需要真实对话则部署到任意支持 Python 的托管平台
 
 ## 后续规划（Roadmap）
 
-- **v2.0 对接真实店铺**：新增后端服务与扣子自定义插件，实现物流实时查询、真实人工客服、商品知识库自动同步。详细方案见 [对接方案文档](docs/integration-plan-v2.md)
-- **v1.2 后端代理**：搭建轻量后端中转扣子 API，让公开网页可安全直连智能体，无需在前端暴露密钥
+- **v2.0 对接真实店铺**：新增扣子自定义插件，实现物流实时查询、真实人工客服、商品知识库自动同步。详细方案见 [对接方案文档](docs/integration-plan-v2.md)
 - **v1.3 效果评测**：补充评测数据集与自动化回归测试，量化意图路由准确率与回复质量
 
 ### 已完成的关键迭代
 
+- **v1.2 后端代理**：新增 `server.py`，令牌由服务端持有并流式转发扣子接口，前端不再接触密钥，公开网页也能安全对话
 - **v1.1 由工作流迁移为对话流**：获得原生多轮记忆，删除人设中冗余的"上下文补全"规则（人设由 11 模块精简为 7 模块）
 
 ## 作者

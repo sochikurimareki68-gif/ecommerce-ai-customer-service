@@ -307,6 +307,7 @@
     font-size: 14px;
     line-height: 1.68;
     word-break: break-word;
+    white-space: pre-wrap;   /* 保留换行；配合 textContent 渲染，不依赖 <br> */
   }
   .message.bot .bubble {
     background: var(--bubble);
@@ -623,12 +624,8 @@
   //   unavailable  后端存在但一直没起来 → 明确报错，不假装成功
   let mode = 'checking';
   let tokenReady = false;
-  let conversationId = sessionStorage.getItem('ym_conversation_id') || '';
-  let userId = localStorage.getItem('ym_user_id');
-  if (!userId) {
-    userId = 'web_' + Math.random().toString(36).slice(2, 10);
-    localStorage.setItem('ym_user_id', userId);
-  }
+  // 身份与会话都由服务端持有（见 server.py 的 SessionStore），
+  // 前端只带一个 HttpOnly cookie，不再自己生成 user_id / 回传 conversation_id
 
   const msgBox = document.getElementById('messages');
   const inputEl = document.getElementById('input');
@@ -793,7 +790,6 @@
       wrap.className = 'message bot';
       const el = document.createElement('div');
       el.className = 'bubble streaming';
-      el.style.whiteSpace = 'pre-wrap';
       wrap.appendChild(el);
       msgBox.appendChild(wrap);
       bubble = el;
@@ -803,8 +799,9 @@
     try {
       const resp = await fetch('/api/chat', {
         method: 'POST',
+        credentials: 'same-origin',   // 带上服务端下发的会话 cookie
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage, conversation_id: conversationId, user_id: userId })
+        body: JSON.stringify({ message: userMessage })
       });
 
       if (!resp.ok || !resp.body) {
@@ -837,10 +834,7 @@
           }
           if (!event) continue;
 
-          if (event === 'meta') {
-            try { conversationId = JSON.parse(data).conversation_id || conversationId; } catch (e) {}
-            if (conversationId) sessionStorage.setItem('ym_conversation_id', conversationId);
-          } else if (event === 'delta') {
+          if (event === 'delta') {
             let piece = '';
             try { piece = JSON.parse(data).content || ''; } catch (e) {}
             if (piece) {
@@ -883,7 +877,8 @@
     }
   }
 
-  // 模拟回复（开发阶段演示用，实际接入 Coze 后删除）
+  // 内置模拟回复：仅在确认没有后端（静态托管，如 GitHub Pages）时使用。
+  // 后端可用时一律走真实对话，绝不回这里的话术冒充 AI 回答。
   function getMockReply(message) {
     const replies = {
       '尺寸': '亲，我们的四件套规格如下：\n• 1.2米床：被套150×200cm\n• 1.5米床：被套200×230cm\n• 1.8米床：被套220×240cm\n购买时请根据床垫尺寸选择对应规格哦~ 😊',
@@ -901,11 +896,22 @@
   }
 
   // 添加消息到聊天区
+  // 用 textContent 而不是 innerHTML 拼接，避免用户输入被当作 HTML 执行（自 XSS）
   function addMessage(text, sender) {
     const stick = isNearBottom();
     const msgDiv = document.createElement('div');
     msgDiv.className = 'message ' + sender;
-    msgDiv.innerHTML = '<div class="bubble">' + text.replace(/\n/g, '<br>') + '</div><div class="time">' + getTime() + '</div>';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+
+    const time = document.createElement('div');
+    time.className = 'time';
+    time.textContent = getTime();
+
+    msgDiv.appendChild(bubble);
+    msgDiv.appendChild(time);
     msgBox.appendChild(msgDiv);
     if (stick) scrollToBottom(false);
   }

@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import os
+import secrets
 import ssl
 import threading
 import time
@@ -128,6 +129,56 @@ class RateLimiter:
 
 LIMITER = RateLimiter()
 
+
+# ----------------------------------------------------------------------
+# 会话（由服务端持有）
+#
+# 如果把 user_id / conversation_id 交给客户端随便填，调用方就能伪造别人身份，
+# 或者指定别人的会话 ID 去读写别人的对话。所以身份和会话都放在服务端，
+# 客户端只拿一个不透明的 cookie。
+# ----------------------------------------------------------------------
+SESSION_COOKIE = "ym_session"
+SESSION_TTL = 3 * 3600      # 3 小时不活动即回收
+MAX_SESSIONS = 5000         # 上限，防止内存无限增长
+
+
+class SessionStore:
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._data: dict[str, dict] = {}
+
+    def _sweep(self) -> None:
+        now = time.time()
+        for token in [t for t, s in self._data.items() if now - s["seen"] > SESSION_TTL]:
+            self._data.pop(token, None)
+        while len(self._data) > MAX_SESSIONS:
+            self._data.pop(min(self._data, key=lambda t: self._data[t]["seen"]), None)
+
+    def resolve(self, token: str) -> tuple[str, str, str, bool]:
+        """返回 (token, user_id, conversation_id, 是否新建)。cookie 缺失/失效时新建。"""
+        with self._lock:
+            self._sweep()
+            fresh = not token or token not in self._data
+            if fresh:
+                token = secrets.token_urlsafe(24)
+                self._data[token] = {
+                    "user_id": f"web_{token[:12]}",   # 由服务端生成，客户端无法指定
+                    "conversation_id": "",
+                    "seen": time.time(),
+                }
+            session = self._data[token]
+            session["seen"] = time.time()
+            return token, session["user_id"], session["conversation_id"], fresh
+
+    def set_conversation(self, token: str, conversation_id: str) -> None:
+        with self._lock:
+            session = self._data.get(token)
+            if session:
+                session["conversation_id"] = conversation_id
+
+
+SESSIONS = SessionStore()
+
 # 扣子常见错误码 → 人话
 ERROR_HINTS = {
     4013: "访问令牌无效或已过期，请重新生成 PAT。",
@@ -174,6 +225,9 @@ class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "YoumianProxy/1.0"
 
+    # 本请求需要下发的 Set-Cookie（新建会话时才会设置）
+    _pending_cookie = ""
+
     # ------------------------------------------------------------------
     # 基础响应工具
     # ------------------------------------------------------------------
@@ -183,6 +237,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if self._pending_cookie:
+            self.send_header("Set-Cookie", self._pending_cookie)
         self.end_headers()
         self.wfile.write(body)
 
@@ -203,6 +259,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Transfer-Encoding", "chunked")
         self.send_header("X-Accel-Buffering", "no")  # 让 nginx 类反代不要缓冲
+        if self._pending_cookie:
+            self.send_header("Set-Cookie", self._pending_cookie)
         self.end_headers()
 
     def _sse_send(self, event: str, data: str) -> None:
@@ -223,6 +281,14 @@ class Handler(BaseHTTPRequestHandler):
         if forwarded:
             return forwarded.split(",")[0].strip()
         return self.client_address[0]
+
+    def _read_cookie(self, name: str) -> str:
+        """从 Cookie 头里取一个值（只取一个，够用）。"""
+        for part in self.headers.get("Cookie", "").split(";"):
+            key, _, value = part.strip().partition("=")
+            if key == name:
+                return value
+        return ""
 
     def _origin_allowed(self) -> bool:
         """校验请求来源。
@@ -328,8 +394,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": f"问题有点长，请控制在 {MAX_MESSAGE_CHARS} 字以内～"})
             return
 
-        conversation_id = (payload.get("conversation_id") or "").strip()
-        user_id = (payload.get("user_id") or "").strip() or "web_anonymous"
+        # 身份与会话都由服务端决定：客户端传什么都不采信
+        token, user_id, conversation_id, fresh = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
+        if fresh:
+            self._pending_cookie = (
+                f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}"
+            )
 
         body = {
             "bot_id": COZE_BOT_ID,
@@ -383,7 +453,7 @@ class Handler(BaseHTTPRequestHandler):
 
         self._sse_start()
         try:
-            self._pump_stream(resp)
+            self._pump_stream(resp, token)
         except (BrokenPipeError, ConnectionResetError):
             pass  # 用户中途关掉页面，正常情况
         finally:
@@ -393,7 +463,7 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
-    def _pump_stream(self, resp) -> None:
+    def _pump_stream(self, resp, token: str) -> None:
         """把扣子的 SSE 事件翻译成前端更简单的三类事件：meta / delta / error。"""
         event = ""
         conversation_id = ""
@@ -434,6 +504,8 @@ class Handler(BaseHTTPRequestHandler):
 
             conversation_id = msg.get("conversation_id") or conversation_id
             if conversation_id and not sent_meta:
+                # 记在服务端，下一轮由服务端自己带上，不依赖客户端回传
+                SESSIONS.set_conversation(token, conversation_id)
                 self._sse_send("meta", json.dumps({"conversation_id": conversation_id}, ensure_ascii=False))
                 sent_meta = True
 

@@ -36,7 +36,6 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 DATASET = ROOT / "eval" / "dataset.json"
@@ -62,9 +61,12 @@ def build_ssl_context() -> ssl.SSLContext:
 SSL_CONTEXT = build_ssl_context()
 
 
-def ask(base_url: str, message: str, user_id: str) -> tuple[bool, str, float, str]:
-    """调用一次代理接口，返回 (是否成功, 回复文本, 耗时秒, 错误信息)。"""
-    payload = json.dumps({"message": message, "user_id": user_id}).encode("utf-8")
+def ask(base_url: str, message: str) -> tuple[bool, str, float, str]:
+    """调用一次代理接口，返回 (是否成功, 回复文本, 耗时秒, 错误信息)。
+
+    不带 cookie，所以每次调用在服务端都是新会话 —— 正好保证用例之间互不影响。
+    """
+    payload = json.dumps({"message": message}).encode("utf-8")
     req = urllib.request.Request(
         base_url.rstrip("/") + "/api/chat",
         data=payload,
@@ -131,7 +133,7 @@ def run_case(case: dict, base_url: str, branch_keywords: dict, forbidden: list[s
     """跑单条用例并打分。"""
     case_id = case["id"]
     for attempt in range(RETRY + 1):
-        ok, reply, elapsed, err = ask(base_url, case["input"], f"eval_{case_id}")
+        ok, reply, elapsed, err = ask(base_url, case["input"])
         if ok:
             break
         if attempt < RETRY:
@@ -164,7 +166,7 @@ def run_case(case: dict, base_url: str, branch_keywords: dict, forbidden: list[s
     return result
 
 
-def summarize(results: list[dict], branch_keywords: dict) -> dict:
+def summarize(results: list[dict]) -> dict:
     total = len(results)
     succeeded = [r for r in results if r["ok"]]
     latencies = [r["elapsed"] for r in succeeded]
@@ -333,7 +335,7 @@ def main() -> int:
                   f"→ {r['branch'] or r['error']:<8} {r['elapsed']:>5.1f}s")
 
     results.sort(key=lambda x: x["id"])
-    s = summarize(results, branch_keywords)
+    s = summarize(results)
 
     meta = {
         "time": datetime.now().strftime("%Y-%m-%d %H:%M"),

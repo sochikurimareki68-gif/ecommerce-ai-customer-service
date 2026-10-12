@@ -866,42 +866,12 @@
 </script>
 
 <!-- ==========================================================
-     Coze Chat SDK 接入（页面右下角悬浮聊天窗口）
-     使用步骤：
-       1. 打开 https://www.coze.cn/open 创建 PAT 个人访问令牌
-       2. 把下方 COZE_PAT_TOKEN 替换为你的令牌（pat_ 开头）
-       3. 刷新页面，右下角出现聊天按钮，即可与"优眠小助手"真实对话
-
-     ⚠️ 令牌属于敏感信息！
-        填好后仅用于本地演示/录屏；
-        推送到 GitHub 之前，务必把令牌改回空字符串 ''
+     关于「为什么不用 Coze Chat SDK」
+     扣子官方还提供 Chat SDK（右下角悬浮聊天窗），接入更省事，
+     但它要求把访问令牌写在前端 JS 里 —— 公开网页等于把账号交出去。
+     本项目因此选择 API + 自建后端代理（见 server.py），令牌只留在服务端。
+     详细对比见 docs 与仓库 README 的「效果评测 / 技术选型」章节。
      ========================================================== -->
-<script>
-  // 本地演示用：填入你的扣子 PAT 令牌（pat_ 开头），右下角会出现真实聊天窗口
-  // 提交到 GitHub 时必须保持为空字符串 ''——网页源码公开，令牌会被他人看到
-  window.COZE_PAT_TOKEN = '';
-</script>
-<script src="https://lf-cdn.coze.cn/obj/unpkg/flow-platform/chat-app-sdk/1.2.0-beta.19/libs/cn/index.js"></script>
-<script>
-  // 仅在填入令牌时加载真实聊天窗口，避免公开部署时泄露密钥
-  if (window.COZE_PAT_TOKEN && window.COZE_PAT_TOKEN.length > 10) {
-    new CozeWebSDK.WebChatClient({
-      config: {
-        bot_id: '7694865098007035940',
-      },
-      componentProps: {
-        title: '优眠小助手',
-      },
-      auth: {
-        type: 'token',
-        token: window.COZE_PAT_TOKEN,
-        onRefreshToken: function () {
-          return window.COZE_PAT_TOKEN;
-        }
-      }
-    });
-  }
-</script>
 
 </body>
 </html>

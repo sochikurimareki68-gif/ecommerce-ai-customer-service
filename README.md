@@ -4,11 +4,13 @@
 
 ## 项目链接
 
-- GitHub 仓库：[ecommerce-ai-customer-service](https://github.com/sochikurimareki68-gif/ecommerce-ai-customer-service)
-- 界面演示：[GitHub Pages](https://sochikurimareki68-gif.github.io/ecommerce-ai-customer-service)
+- **在线体验（可真实对话）**：[youmian-customer-service.onrender.com](https://youmian-customer-service.onrender.com)
+  - 部署在 Render 免费实例上，闲置一段时间后首次访问需等待约 50 秒唤醒
+- **源码仓库**：[ecommerce-ai-customer-service](https://github.com/sochikurimareki68-gif/ecommerce-ai-customer-service)
+- **静态演示**：[GitHub Pages](https://sochikurimareki68-gif.github.io/ecommerce-ai-customer-service)（纯前端，展示界面与交互，无需后端）
 - 演示视频：待补充
 
-> 智能体运行在扣子 Coze 平台，需在扣子账号内搭建使用。本仓库提供完整的人设 Prompt、知识库、对话流设计与测试用例，可按文档复现。
+> 智能体运行在扣子 Coze 平台，需在扣子账号内搭建使用。本仓库提供完整的人设 Prompt、知识库、对话流设计、评测数据集，可按文档完整复现。
 
 ## 功能
 
@@ -75,7 +77,7 @@ ecommerce-ai-customer-service/
 │   ├── faq-knowledge-base.md   # FAQ 知识库（50条，6大类）
 │   ├── product-catalog.md      # 商品目录与价格表（20款）
 │   ├── chatflow-design.md      # 六路条件判断对话流设计
-│   ├── test-cases.md           # 测试用例（25组）
+│   ├── test-cases.md           # 测试用例设计（25组，执行结果见 eval/）
 │   └── integration-plan-v2.md  # v2.0 对接真实店铺方案（物流/人工/知识库同步）
 └── README.md
 ```

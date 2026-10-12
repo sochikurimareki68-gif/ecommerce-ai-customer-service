@@ -186,6 +186,16 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _reject(self, status: int, error: str) -> None:
+        """提前拒绝请求 —— 必须断开连接。
+
+        这些分支在读取请求体之前就返回了。如果保持长连接，没读完的 body 会
+        留在 socket 里，被当成下一个请求的起始行。反代（如 Render）会复用
+        后端连接，于是后续请求全部损坏（实测报 "Bad request syntax"）。
+        """
+        self.close_connection = True
+        self._send_json(status, {"error": error})
+
     # SSE 用 chunked 编码逐块下发，保证前端能实时看到文字
     def _sse_start(self) -> None:
         self.send_response(200)
@@ -247,7 +257,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/chat":
             self._handle_chat()
             return
-        self._send_json(404, {"error": "接口不存在"})
+        self._reject(404, "接口不存在")
 
     # ------------------------------------------------------------------
     # 静态文件
@@ -286,27 +296,28 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     def _handle_chat(self) -> None:
         if not COZE_API_TOKEN:
-            self._send_json(500, {"error": "服务端未配置 COZE_API_TOKEN，请先在 .env 中填写"})
+            self._reject(500, "服务端未配置 COZE_API_TOKEN，请先在 .env 中填写")
             return
 
         # ---- 第 1、2、3 层防护：来源校验 + 限流（先拦，避免白读请求体）----
+        # 注意：这些分支都在读 body 之前返回，必须用 _reject 断开连接
         if not self._origin_allowed():
-            self._send_json(403, {"error": "请求来源不被允许"})
+            self._reject(403, "请求来源不被允许")
             return
         allowed, reason = LIMITER.check(self._client_ip())
         if not allowed:
-            self._send_json(429, {"error": reason})
+            self._reject(429, reason)
             return
 
         # ---- 第 4 层防护：请求体大小 ----
         try:
             length = int(self.headers.get("Content-Length") or 0)
             if length > MAX_BODY_BYTES:
-                self._send_json(413, {"error": "请求体过大"})
+                self._reject(413, "请求体过大")
                 return
             payload = json.loads(self.rfile.read(length) or b"{}")
         except (ValueError, json.JSONDecodeError):
-            self._send_json(400, {"error": "请求体不是合法 JSON"})
+            self._reject(400, "请求体不是合法 JSON")
             return
 
         message = (payload.get("message") or "").strip()

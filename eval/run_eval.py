@@ -61,6 +61,28 @@ def build_ssl_context() -> ssl.SSLContext:
 SSL_CONTEXT = build_ssl_context()
 
 
+def iter_sse_events(resp):
+    """逐行解析 SSE 流，产出 (event, data) 元组。
+
+    与前端 index.html 的解析逻辑保持一致：空行分隔事件，data 多行拼接。
+    代理只下发 meta / delta / error / done 四类事件，这里只负责拆包，不做业务判断。
+    """
+    event = ""
+    data_lines: list[str] = []
+    for raw in resp:
+        line = raw.decode("utf-8", "replace").rstrip("\r\n")
+        if not line:            # 空行 = 一个事件结束
+            if event:
+                yield event, "\n".join(data_lines)
+            event = ""
+            data_lines = []
+            continue
+        if line.startswith("event:"):
+            event = line[6:].strip()
+        elif line.startswith("data:"):
+            data_lines.append(line[5:].strip())
+
+
 def ask(base_url: str, message: str) -> tuple[bool, str, float, str]:
     """调用一次代理接口，返回 (是否成功, 回复文本, 耗时秒, 错误信息)。
 
@@ -78,18 +100,7 @@ def ask(base_url: str, message: str) -> tuple[bool, str, float, str]:
     try:
         with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=SSL_CONTEXT) as resp:
             answer = ""
-            event = ""
-            for raw in resp:
-                line = raw.decode("utf-8", "replace").rstrip("\r\n")
-                if not line:
-                    event = ""
-                    continue
-                if line.startswith("event:"):
-                    event = line[6:].strip()
-                    continue
-                if not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
+            for event, data in iter_sse_events(resp):
                 if event == "delta" and data:
                     try:
                         answer += json.loads(data).get("content", "")
@@ -311,7 +322,7 @@ def main() -> int:
         cases = cases[: args.limit]
 
     branch_keywords = data["branch_keywords"]
-    forbidden = data["必须避免出现"]
+    forbidden = data["forbidden"]
 
     print(f"▶ 评测开始：{len(cases)} 条用例 | 并发 {args.workers} | 接口 {args.base}")
     print("─" * 62)

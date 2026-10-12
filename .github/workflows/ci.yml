@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 语法检查（py_compile）
+        run: |
+          python -m py_compile server.py
+          python -m py_compile eval/run_eval.py
+
+      - name: JSON 数据校验
+        run: |
+          python -m json.tool eval/dataset.json > /dev/null
+          python -c "import json; d=json.load(open('eval/dataset.json')); assert 'forbidden' in d and 'branch_keywords' in d and 'cases' in d; print('dataset.json OK,', len(d['cases']), 'cases')"
+
+      - name: 评测脚本 smoke test（仅加载，不调用接口）
+        run: |
+          python eval/run_eval.py --help

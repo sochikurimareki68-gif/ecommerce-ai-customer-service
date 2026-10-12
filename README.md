@@ -217,3 +217,8 @@ python3 eval/run_eval.py     # 终端 2：跑全部用例，结果写入 eval/re
 ## 作者
 
 [sochikurimareki68-gif](https://github.com/sochikurimareki68-gif)
+
+## 许可
+
+MIT License，详见 [LICENSE](LICENSE)。
+

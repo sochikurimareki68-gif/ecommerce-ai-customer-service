@@ -68,6 +68,8 @@ ecommerce-ai-customer-service/
 ├── Procfile                    # 通用启动命令（Render / Railway / Heroku 系）
 ├── requirements.txt            # 声明无第三方依赖
 ├── .env.example                # 环境变量示例（复制为 .env 并填写令牌）
+├── .github/workflows/ci.yml    # CI：语法检查 + JSON 校验 + 评测脚本 smoke test
+├── LICENSE                     # MIT 许可
 ├── eval/
 │   ├── dataset.json            # 评测数据集（30 条用例 + 分支关键词）
 │   ├── run_eval.py             # 自动化评测脚本（零依赖，可并发）

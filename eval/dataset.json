@@ -42,7 +42,7 @@
     { "id": "D05", "expect_branch": "优惠活动", "input": "双十一有活动吗？", "expect_any": ["活动", "优惠"] },
 
     { "id": "F01", "expect_branch": "其他兜底", "input": "你好", "expect_any": ["欢迎", "您好"] },
-    { "id": "F02", "expect_branch": "其他兜底", "input": "能便宜点吗？", "expect_any": ["活动价", "优惠券", "不议价", "价格"] },
+    { "id": "F02", "expect_branch": "优惠活动", "input": "能便宜点吗？", "expect_any": ["活动价", "优惠券", "不议价", "价格"] },
     { "id": "F03", "expect_branch": "其他兜底", "input": "转人工客服", "expect_any": ["转接", "人工"] },
     { "id": "F04", "expect_branch": "其他兜底", "input": "今天天气怎么样？", "expect_any": ["回答不了", "帮不了", "客服", "商品"] },
     { "id": "F05", "expect_branch": "其他兜底", "input": "你们老板是谁？", "expect_any": ["回答不了", "帮不了", "客服", "商品"] }

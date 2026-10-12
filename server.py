@@ -307,6 +307,7 @@ class Handler(BaseHTTPRequestHandler):
     # 路由
     # ------------------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802
+        self._pending_cookie = ""      # 同一连接会连续处理多个请求，进入时必须清空
         path = urlparse(self.path).path
         if path == "/api/health":
             self._send_json(200, {
@@ -319,6 +320,7 @@ class Handler(BaseHTTPRequestHandler):
         self._serve_static(path)
 
     def do_POST(self) -> None:  # noqa: N802
+        self._pending_cookie = ""      # 同上
         path = urlparse(self.path).path
         if path == "/api/chat":
             self._handle_chat()
@@ -394,12 +396,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(400, {"error": f"问题有点长，请控制在 {MAX_MESSAGE_CHARS} 字以内～"})
             return
 
-        # 身份与会话都由服务端决定：客户端传什么都不采信
-        token, user_id, conversation_id, fresh = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
-        if fresh:
-            self._pending_cookie = (
-                f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}"
-            )
+        # 身份与会话都由服务端决定：客户端传什么都不采信。
+        # 每次都下发 cookie —— 会话有效时相当于刷新有效期，用户持续使用就不会掉线。
+        token, user_id, conversation_id, _ = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
+        self._pending_cookie = (
+            f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}"
+        )
 
         body = {
             "bot_id": COZE_BOT_ID,

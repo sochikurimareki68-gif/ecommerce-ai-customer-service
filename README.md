@@ -108,6 +108,23 @@ open http://localhost:3000
 > 想让别人在线试用，把本仓库部署到任意支持 Python 的托管平台（如 Render / Railway / Fly.io），
 > 在平台的环境变量中配置 `COZE_API_TOKEN` 即可。GitHub Pages 只能托管静态文件，跑不了后端。
 
+### 可配置环境变量
+
+所有参数都有默认值，通常只需填 `COZE_API_TOKEN`。需要调参时覆盖即可：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `COZE_API_TOKEN` | （空） | 扣子个人访问令牌，必填 |
+| `COZE_BOT_ID` | `7694865098007035940` | 智能体 ID |
+| `COZE_API_BASE` | `https://api.coze.cn` | 接口域名（国际版用 `https://api.coze.com`） |
+| `PORT` / `HOST` | `3000` / `0.0.0.0` | 监听端口与地址 |
+| `MAX_BODY_BYTES` | `4096` | 单次请求体上限（字节） |
+| `MAX_MESSAGE_CHARS` | `500` | 单条消息最大字符数 |
+| `IP_PER_MINUTE` | `6` | 单 IP 每分钟提问上限 |
+| `IP_PER_DAY` | `60` | 单 IP 每天提问上限 |
+| `GLOBAL_PER_DAY` | `500` | 全站每日提问总量上限（兜底止损） |
+| `ALLOWED_ORIGINS` | （空） | 额外允许的来源域名，逗号分隔 |
+
 ## 部署到公网（让别人能访问）
 
 GitHub Pages 只能托管静态文件，跑不了后端，所以**真实对话必须部署到支持 Python 的平台**。

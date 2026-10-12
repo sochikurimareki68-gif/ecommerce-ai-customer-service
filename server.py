@@ -13,8 +13,8 @@
 
 对外提供两个接口：
     GET  /api/health   →  告诉前端"后端是否就绪、令牌是否已配置"
-    POST /api/chat     →  接收 {message, conversation_id, user_id}，
-                          以 SSE 流式返回智能体的回复
+    POST /api/chat     →  接收 {"message": "..."}，以 SSE 流式返回智能体的回复
+                          （user_id / conversation_id 由服务端管理，客户端传了也不采信）
 
 同时它也是个静态文件服务器，直接托管 index.html。
 
@@ -103,6 +103,10 @@ class RateLimiter:
             self._day = today
             self._ip_day.clear()
             self._global_day = 0
+        # 清理超过 60 秒没有活动的 IP，避免 _hits 字典无限增长（被公网扫描时尤其重要）
+        now = time.time()
+        for ip in [ip for ip, dq in self._hits.items() if not dq or now - dq[-1] > 60]:
+            self._hits.pop(ip, None)
 
     def check(self, ip: str) -> tuple[bool, str]:
         """消耗一次配额。返回 (是否放行, 拒绝原因)。"""
@@ -113,15 +117,25 @@ class RateLimiter:
             if self._global_day >= GLOBAL_PER_DAY:
                 return False, "今天的试用额度已经用完了，请明天再来～"
 
-            hits = self._hits.setdefault(ip, deque())
-            while hits and now - hits[0] > 60:
-                hits.popleft()
+            # 取出该 IP 的滑动窗口；过期时间戳清理后若窗口已空，则从字典移除，
+            # 否则只访问一次的 IP 会永久占一个条目，字典无限增长。
+            hits = self._hits.get(ip)
+            if hits is not None:
+                while hits and now - hits[0] > 60:
+                    hits.popleft()
+                if not hits:
+                    self._hits.pop(ip, None)
+                    hits = None
+            if hits is None:
+                hits = deque()
+
             if len(hits) >= IP_PER_MINUTE:
                 return False, "提问有点快哦，请等一分钟再试～"
             if self._ip_day.get(ip, 0) >= IP_PER_DAY:
                 return False, "您今天的提问次数已达上限，请明天再来～"
 
             hits.append(now)
+            self._hits[ip] = hits
             self._ip_day[ip] = self._ip_day.get(ip, 0) + 1
             self._global_day += 1
             return True, ""
@@ -223,7 +237,7 @@ SSL_CONTEXT = build_ssl_context()
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "YoumianProxy/1.0"
+    server_version = "YoumianProxy/1.3"   # 与项目当前版本对齐，方便线上排查
 
     # 本请求需要下发的 Set-Cookie（新建会话时才会设置）
     _pending_cookie = ""

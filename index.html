@@ -834,6 +834,9 @@
           }
           if (!event) continue;
 
+          // 代理下发四类事件：meta / delta / error / done。
+          // meta 里的 conversation_id 由服务端管理（见 server.py SessionStore），
+          // 前端不需要也不应该保存，所以这里只处理 delta 和 error，其余忽略。
           if (event === 'delta') {
             let piece = '';
             try { piece = JSON.parse(data).content || ''; } catch (e) {}

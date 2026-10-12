@@ -31,8 +31,11 @@ import json
 import mimetypes
 import os
 import ssl
+import threading
+import time
 import urllib.error
 import urllib.request
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
@@ -60,8 +63,70 @@ COZE_API_TOKEN = os.environ.get("COZE_API_TOKEN", "").strip()
 PORT = int(os.environ.get("PORT", "3000"))
 HOST = os.environ.get("HOST", "0.0.0.0")
 
-# 这些文件绝不对外暴露
-BLOCKED_NAMES = {".env", ".env.example", ".gitignore", ".git"}
+# ----------------------------------------------------------------------
+# 访问保护
+#
+# 这个 Demo 部署在公网，而每次 /api/chat 都会消耗扣子额度 —— 一个循环脚本
+# 就能在几分钟内把额度刷光、让整个 Demo 挂掉。所以加四层基础防护：
+#
+#   1) 请求来源校验：挡住别的网站把它当免费接口用
+#   2) 单 IP 限流：每分钟 / 每天各有上限
+#   3) 全站每日总量上限：即使被换 IP 刷，也能兜底止损
+#   4) 请求体大小与问题长度限制
+#
+# 都是单实例内存实现（Render 免费版只有一个实例，够用）。全部可用环境变量覆盖。
+# ----------------------------------------------------------------------
+MAX_BODY_BYTES = int(os.environ.get("MAX_BODY_BYTES", "4096"))
+MAX_MESSAGE_CHARS = int(os.environ.get("MAX_MESSAGE_CHARS", "500"))
+IP_PER_MINUTE = int(os.environ.get("IP_PER_MINUTE", "6"))
+IP_PER_DAY = int(os.environ.get("IP_PER_DAY", "60"))
+GLOBAL_PER_DAY = int(os.environ.get("GLOBAL_PER_DAY", "500"))
+EXTRA_ORIGINS = [
+    o.strip().rstrip("/") for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
+]
+
+
+class RateLimiter:
+    """极简内存限流器：滑动窗口（每分钟）+ 计数（每天、全站）。"""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._hits: dict[str, deque] = {}
+        self._day = ""
+        self._ip_day: dict[str, int] = {}
+        self._global_day = 0
+
+    def _roll_day(self) -> None:
+        today = time.strftime("%Y-%m-%d")
+        if today != self._day:
+            self._day = today
+            self._ip_day.clear()
+            self._global_day = 0
+
+    def check(self, ip: str) -> tuple[bool, str]:
+        """消耗一次配额。返回 (是否放行, 拒绝原因)。"""
+        with self._lock:
+            self._roll_day()
+            now = time.time()
+
+            if self._global_day >= GLOBAL_PER_DAY:
+                return False, "今天的试用额度已经用完了，请明天再来～"
+
+            hits = self._hits.setdefault(ip, deque())
+            while hits and now - hits[0] > 60:
+                hits.popleft()
+            if len(hits) >= IP_PER_MINUTE:
+                return False, "提问有点快哦，请等一分钟再试～"
+            if self._ip_day.get(ip, 0) >= IP_PER_DAY:
+                return False, "您今天的提问次数已达上限，请明天再来～"
+
+            hits.append(now)
+            self._ip_day[ip] = self._ip_day.get(ip, 0) + 1
+            self._global_day += 1
+            return True, ""
+
+
+LIMITER = RateLimiter()
 
 # 扣子常见错误码 → 人话
 ERROR_HINTS = {
@@ -140,6 +205,29 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.flush()
 
     # ------------------------------------------------------------------
+    # 访问保护
+    # ------------------------------------------------------------------
+    def _client_ip(self) -> str:
+        """取真实客户端 IP。Render 之类平台会经反代，真实 IP 在 X-Forwarded-For 里。"""
+        forwarded = self.headers.get("X-Forwarded-For", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+        return self.client_address[0]
+
+    def _origin_allowed(self) -> bool:
+        """校验请求来源。
+
+        浏览器请求一定带 Origin；不带 Origin 的是脚本（curl / 评测脚本），
+        由限流兜底，这里放行。所以这条规则拦的是「别的网站拿这个 Demo 当免费接口」。
+        """
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        host = self.headers.get("Host", "")
+        allowed = {f"http://{host}", f"https://{host}"} | set(EXTRA_ORIGINS)
+        return origin.rstrip("/") in allowed
+
+    # ------------------------------------------------------------------
     # 路由
     # ------------------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802
@@ -201,8 +289,21 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(500, {"error": "服务端未配置 COZE_API_TOKEN，请先在 .env 中填写"})
             return
 
+        # ---- 第 1、2、3 层防护：来源校验 + 限流（先拦，避免白读请求体）----
+        if not self._origin_allowed():
+            self._send_json(403, {"error": "请求来源不被允许"})
+            return
+        allowed, reason = LIMITER.check(self._client_ip())
+        if not allowed:
+            self._send_json(429, {"error": reason})
+            return
+
+        # ---- 第 4 层防护：请求体大小 ----
         try:
             length = int(self.headers.get("Content-Length") or 0)
+            if length > MAX_BODY_BYTES:
+                self._send_json(413, {"error": "请求体过大"})
+                return
             payload = json.loads(self.rfile.read(length) or b"{}")
         except (ValueError, json.JSONDecodeError):
             self._send_json(400, {"error": "请求体不是合法 JSON"})
@@ -211,6 +312,9 @@ class Handler(BaseHTTPRequestHandler):
         message = (payload.get("message") or "").strip()
         if not message:
             self._send_json(400, {"error": "message 不能为空"})
+            return
+        if len(message) > MAX_MESSAGE_CHARS:
+            self._send_json(400, {"error": f"问题有点长，请控制在 {MAX_MESSAGE_CHARS} 字以内～"})
             return
 
         conversation_id = (payload.get("conversation_id") or "").strip()

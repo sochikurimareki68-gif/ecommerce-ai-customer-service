@@ -478,6 +478,22 @@
     letter-spacing: 0.02em;
   }
 
+  /* 后端未就绪 / 不可用时的状态 */
+  .notice-line {
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    margin: 2px 0 14px;
+  }
+  .chat-input input:disabled { cursor: not-allowed; opacity: 0.65; }
+  body[data-mode="checking"] .quick-reply,
+  body[data-mode="checking"] .empty-hint li,
+  body[data-mode="unavailable"] .quick-reply,
+  body[data-mode="unavailable"] .empty-hint li {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
   /* ================= 动效 ================= */
   @keyframes rise {
     from { opacity: 0; transform: translateY(6px); }
@@ -513,7 +529,7 @@
   }
 </style>
 </head>
-<body>
+<body data-mode="checking">
 
 <div class="chat-container">
   <!-- 头部 -->
@@ -577,7 +593,7 @@
   <!-- 输入区 -->
   <div class="chat-input">
     <div class="input-row">
-      <input type="text" id="input" placeholder="输入您的问题…" autocomplete="off" onkeypress="if(event.key==='Enter') sendMessage()">
+      <input type="text" id="input" placeholder="连接服务中…" autocomplete="off" disabled onkeypress="if(event.key==='Enter') sendMessage()">
       <button type="button" id="sendBtn" onclick="sendMessage()" aria-label="发送">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M12 19.5V5"></path>
@@ -600,7 +616,13 @@
   //  ⚠️ 前端不存放任何令牌；令牌只保存在服务端的 .env 里
   // ==========================================
 
-  let backendReady = false;
+  // ---------- 运行模式 ----------
+  //   checking     正在探测 / 等待后端就绪（期间禁止提问，避免拿到假答案）
+  //   live         后端可用 → 真实对话
+  //   demo         已确认没有后端（如 GitHub Pages 静态托管）→ 走内置模拟回复演示
+  //   unavailable  后端存在但一直没起来 → 明确报错，不假装成功
+  let mode = 'checking';
+  let tokenReady = false;
   let conversationId = sessionStorage.getItem('ym_conversation_id') || '';
   let userId = localStorage.getItem('ym_user_id');
   if (!userId) {
@@ -634,12 +656,13 @@
     }
   }
 
-  // 发送按钮的可用状态
+  // 输入区可用状态：只有 live / demo 才允许提问
   function syncSendState() {
-    sendBtn.disabled = inputEl.value.trim().length === 0;
+    const usable = (mode === 'live' || mode === 'demo');
+    inputEl.disabled = !usable;
+    sendBtn.disabled = !usable || inputEl.value.trim().length === 0;
   }
   inputEl.addEventListener('input', syncSendState);
-  syncSendState();
 
   // "回到最新"按钮
   const toBottom = document.getElementById('toBottom');
@@ -661,25 +684,66 @@
     sendMessage();
   }
 
-  // 探测后端代理是否可用（静态托管时探测失败 → 走模拟回复）
-  async function checkBackend() {
-    let health = null;
-    try {
-      const resp = await fetch('/api/health', { cache: 'no-store' });
-      health = await resp.json();
-    } catch (e) {
-      health = null;
-    }
-    backendReady = !!(health && health.ok);
-
+  // 按当前模式刷新提示条与输入区状态
+  function applyMode() {
+    document.body.dataset.mode = mode;
     const span = document.querySelector('.online-bar span');
-    if (!span) return;
-    if (backendReady && health.token_ready) {
-      span.textContent = '已连接真实智能体：本页由后端代理调用扣子 API，可自由提问';
-    } else if (backendReady) {
-      span.textContent = '后端已启动，但服务端 .env 里还没填 COZE_API_TOKEN，暂时无法对话';
-    } else {
-      span.textContent = '本页为界面演示，项目完整实现（人设 Prompt / 知识库 / 对话流设计）见源码仓库';
+    if (span) {
+      if (mode === 'live' && tokenReady) {
+        span.textContent = '已连接真实智能体：本页由后端代理调用扣子 API，可自由提问';
+      } else if (mode === 'live') {
+        span.textContent = '后端已启动，但服务端 .env 里还没填 COZE_API_TOKEN，暂时无法对话';
+      } else if (mode === 'demo') {
+        span.textContent = '本页为界面演示，项目完整实现（人设 Prompt / 知识库 / 对话流设计）见源码仓库';
+      } else if (mode === 'unavailable') {
+        span.textContent = '服务暂时不可用（后端未就绪），请稍后刷新页面重试';
+      } else {
+        span.textContent = '正在连接服务…';
+      }
+    }
+    syncSendState();
+    inputEl.placeholder = (mode === 'checking')
+      ? '连接服务中…'
+      : (mode === 'unavailable' ? '服务暂不可用' : '输入您的问题…');
+  }
+
+  // 单次健康探测：ok = 可用；static = 确认没有后端；down = 后端存在但还没就绪
+  async function probeHealth(timeoutMs) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const resp = await fetch('/api/health', { cache: 'no-store', signal: ctrl.signal });
+      if (resp.status === 404 || resp.status === 405) return 'static';  // 静态托管：没有这个接口
+      if (!resp.ok) return 'down';                                      // 502/503：后端在启动
+      let data = null;
+      try { data = await resp.json(); } catch (e) { return 'static'; }   // 回来的不是 JSON，说明不是本项目后端
+      if (!data || !data.ok) return 'down';
+      tokenReady = !!data.token_ready;
+      return 'ok';
+    } catch (e) {
+      return 'down';   // 网络错误 / 超时：后端可能正在冷启动
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // 探测后端。冷启动（例如 Render 免费实例唤醒，约 50 秒）期间禁用提问并持续重试，
+  // 避免用户在这个窗口里拿到「模拟回复」却以为是 AI 回答。
+  async function checkBackend() {
+    const DEADLINE_MS = 90000;
+    const started = Date.now();
+    applyMode();
+
+    while (true) {
+      const state = await probeHealth(8000);
+      if (state === 'ok') { mode = 'live'; applyMode(); return; }
+      if (state === 'static') { mode = 'demo'; applyMode(); return; }
+      if (Date.now() - started >= DEADLINE_MS) { mode = 'unavailable'; applyMode(); return; }
+
+      const waited = Math.round((Date.now() - started) / 1000);
+      const span = document.querySelector('.online-bar span');
+      if (span) span.textContent = '正在唤醒服务，请稍候…（已等待 ' + waited + ' 秒）';
+      await new Promise(r => setTimeout(r, 3000));
     }
   }
 
@@ -687,7 +751,11 @@
   function sendMessage() {
     const text = inputEl.value.trim();
     if (!text) return;
-    if (sendBtn.dataset.busy === '1') return;   // 上一条还在生成中，先不重复发
+
+    // 后端还没就绪 / 不可用时，明确告知，绝不回模拟答案冒充真实回答
+    if (mode === 'checking') { addNotice('正在连接服务，请稍候…'); return; }
+    if (mode === 'unavailable') { addNotice('服务暂时不可用，请稍后刷新页面重试。'); return; }
+    if (sendBtn.dataset.busy === '1') return;   // 上一条还在生成中
 
     // 显示用户消息
     addMessage(text, 'user');
@@ -695,10 +763,10 @@
     syncSendState();
     hideEmptyHint();
 
-    if (backendReady) {
+    if (mode === 'live') {
       streamReply(text);
     } else {
-      // 静态演示：走内置模拟回复
+      // 静态托管演示：走内置模拟回复（仅在确认没有后端时才会走到这里）
       const typingId = showTyping();
       setTimeout(() => {
         removeTyping(typingId);
@@ -840,6 +908,15 @@
     msgDiv.innerHTML = '<div class="bubble">' + text.replace(/\n/g, '<br>') + '</div><div class="time">' + getTime() + '</div>';
     msgBox.appendChild(msgDiv);
     if (stick) scrollToBottom(false);
+  }
+
+  // 提示行（用于「正在连接」「服务不可用」等系统级说明）
+  function addNotice(text) {
+    const el = document.createElement('div');
+    el.className = 'notice-line';
+    el.textContent = text;
+    msgBox.appendChild(el);
+    scrollToBottom(false);
   }
 
   // 显示"正在输入"

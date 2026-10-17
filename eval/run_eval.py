@@ -290,7 +290,12 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
 
     a("## 五、评测方法与局限")
     a("")
-    a("- **数据来源**：`eval/dataset.json`，6 类意图各 5 条，共 30 条，覆盖常见问法与边界问法（闲聊、议价、投诉）。")
+    branch_order = ["商品咨询", "洗护指南", "物流发货", "退换售后", "优惠活动", "其他兜底"]
+    dist = {b: 0 for b in branch_order}
+    for r in results:
+        dist[r["expect"]] = dist.get(r["expect"], 0) + 1
+    dist_text = "、".join(f"{b} {c} 条" for b, c in dist.items() if c)
+    a(f"- **数据来源**：`eval/dataset.json`，共 {s['total']} 条（{dist_text}），覆盖常见问法与边界问法（闲聊、议价、投诉）。")
     a("- **调用方式**：逐条请求 `POST /api/chat`，每条用例使用独立 `user_id` 且不复用会话，保证用例之间互不影响。")
     a("- **路由判定**：扣子对话流的分类结果不对外暴露，因此由**回复文本中的分支关键词**反推实际分支；"
       "打分按关键词长度加权（越长的短语越具体），得分最高者判为该分支。")

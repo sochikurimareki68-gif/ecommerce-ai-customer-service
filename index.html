@@ -849,7 +849,7 @@
           } else if (event === 'error') {
             let msg = '智能体暂时无法回答，请稍后再试。';
             try { msg = JSON.parse(data).message || msg; } catch (e) {}
-            ensureBubble().textContent = '亲，' + msg;
+            ensureBubble().textContent = answer ? answer + '\n亲，' + msg : '亲，' + msg;
             errored = true;
           }
         }

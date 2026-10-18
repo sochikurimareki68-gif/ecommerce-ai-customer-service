@@ -95,8 +95,10 @@ cp .env.example .env        # 然后编辑 .env，填入 COZE_API_TOKEN
 # 2. 启动服务（零第三方依赖，只用 Python 标准库）
 python3 server.py
 
-# 3. 打开页面
-open http://localhost:3000
+# 3. 打开页面（macOS 用 open；Windows 用 start；Linux 用 xdg-open）
+open http://localhost:3000       # macOS
+# start http://localhost:3000    # Windows
+# xdg-open http://localhost:3000 # Linux
 ```
 
 `server.py` 同时承担两件事：托管静态页面 + 提供 `POST /api/chat` 流式转发扣子接口。
@@ -126,6 +128,8 @@ open http://localhost:3000
 | `IP_PER_DAY` | `60` | 单 IP 每天提问上限 |
 | `GLOBAL_PER_DAY` | `500` | 全站每日提问总量上限（兜底止损） |
 | `ALLOWED_ORIGINS` | （空） | 额外允许的来源域名，逗号分隔 |
+| `COZE_CA_BUNDLE` | （空） | 自定义 CA 证书路径；本地证书校验失败（certificate verify failed）时手动指定 |
+| `COOKIE_SECURE` | （空） | 强制给会话 Cookie 加 `Secure`（`1`/`true`/`yes`）；留空则按请求的 `X-Forwarded-Proto` 自动判断（HTTPS 部署自动加，本地不加） |
 
 ## 部署到公网（让别人能访问）
 
@@ -194,11 +198,12 @@ GitHub Pages 只能托管静态文件，跑不了后端，所以**真实对话�
 | 平均响应延迟 | 18.6s（P95 30.6s） | — |
 
 五条业务分支路由：**洗护指南 / 物流发货 / 退换售后 / 优惠活动均为 100%**，商品咨询 80%（歧义问法
-「枕芯和枕套有什么区别？」被判入了洗护分支，属于边界场景）。
+「枕芯和枕套有什么区别？」经关键词加权后多个分支并列、判定为「歧义」边界场景，回复内容本身可用）。
 
 3 条未完全通过：
-· P05「枕芯和枕套有什么区别？」——歧义问法被路由到洗护而非商品咨询（路由问题，回复内容本身可用）
-· R01「鞋子能退吗？」/ R03「我上周买的手机壳退货流程是什么？」——退换售后分支只反问了
+· P05「枕芯和枕套有什么区别？」——歧义问法在关键词反推下无法唯一定分支（记为「歧义」的边界场景，
+  回复内容本身可用）
+· R01「退货流程是什么？」/ R03「7天无理由怎么算时间？」——退换售后分支只反问了
   用户具体情况，未先给出 7 天无理由退货流程，未命中评测关键词（Prompt 优化方向见
   chatflow-design.md 分支④：要求模型先给通用流程再追问，已更新）。
 

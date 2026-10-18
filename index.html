@@ -716,6 +716,7 @@
       try { data = await resp.json(); } catch (e) { return 'static'; }   // 回来的不是 JSON，说明不是本项目后端
       if (!data || !data.ok) return 'down';
       tokenReady = !!data.token_ready;
+      if (data.max_message_chars) inputEl.maxLength = data.max_message_chars;  // 输入上限与服务端一致
       return 'ok';
     } catch (e) {
       return 'down';   // 网络错误 / 超时：后端可能正在冷启动

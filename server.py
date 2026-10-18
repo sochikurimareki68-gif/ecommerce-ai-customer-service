@@ -27,6 +27,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import mimetypes
 import os
@@ -82,6 +83,8 @@ MAX_MESSAGE_CHARS = int(os.environ.get("MAX_MESSAGE_CHARS", "500"))
 IP_PER_MINUTE = int(os.environ.get("IP_PER_MINUTE", "6"))
 IP_PER_DAY = int(os.environ.get("IP_PER_DAY", "60"))
 GLOBAL_PER_DAY = int(os.environ.get("GLOBAL_PER_DAY", "500"))
+# 会话 Cookie 是否强制加 Secure；留空则按请求的 X-Forwarded-Proto 自动判断（HTTPS 部署加，本地不加）
+COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "").strip().lower() in ("1", "true", "yes")
 EXTRA_ORIGINS = [
     o.strip().rstrip("/") for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
@@ -329,6 +332,7 @@ class Handler(BaseHTTPRequestHandler):
                 "bot_id": COZE_BOT_ID,
                 "api_base": COZE_API_BASE,
                 "token_ready": bool(COZE_API_TOKEN),
+                "max_message_chars": MAX_MESSAGE_CHARS,
             })
             return
         self._serve_static(path)
@@ -413,9 +417,11 @@ class Handler(BaseHTTPRequestHandler):
         # 身份与会话都由服务端决定：客户端传什么都不采信。
         # 每次都下发 cookie —— 会话有效时相当于刷新有效期，用户持续使用就不会掉线。
         token, user_id, conversation_id, _ = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
-        self._pending_cookie = (
-            f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}"
-        )
+        cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}"
+        # HTTPS 部署下加 Secure（含反向代理场景）；本地 HTTP 不加，COOKIE_SECURE 强制开启
+        if COOKIE_SECURE or self.headers.get("X-Forwarded-Proto") == "https":
+            cookie += "; Secure"
+        self._pending_cookie = cookie
 
         body = {
             "bot_id": COZE_BOT_ID,
@@ -445,7 +451,10 @@ class Handler(BaseHTTPRequestHandler):
         try:
             resp = urllib.request.urlopen(req, timeout=120, context=SSL_CONTEXT)
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", "replace")
+            try:
+                detail = exc.read().decode("utf-8", "replace")
+            except OSError:
+                detail = ""
             self._send_json(exc.code, {
                 "error": self._error_message(detail, f"扣子接口返回 HTTP {exc.code}"),
                 "detail": detail[:500],
@@ -470,8 +479,15 @@ class Handler(BaseHTTPRequestHandler):
         self._sse_start()
         try:
             self._pump_stream(resp, token)
-        except (BrokenPipeError, ConnectionResetError):
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass  # 用户中途关掉页面，正常情况
+        except (OSError, http.client.IncompleteRead):
+            # 其余异常（扣子侧超时、连接中断、TLS 错误等）：告知前端，
+            # 避免页面一直挂在半截回复上等不到结束事件。发送失败说明连接也没了，忽略即可。
+            try:
+                self._sse_send("error", json.dumps({"message": "智能体连接中断，请稍后重试。"}, ensure_ascii=False))
+            except OSError:
+                pass
         finally:
             resp.close()
             try:

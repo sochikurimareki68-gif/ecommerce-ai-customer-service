@@ -213,6 +213,11 @@ def summarize(results: list[dict]) -> dict:
     }
 
 
+def md_cell(text) -> str:
+    """转义 Markdown 表格单元格内的管道符与换行，防止回复内容撑破表格。"""
+    return str(text).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
+
+
 def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     lines = []
     a = lines.append
@@ -263,8 +268,9 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
                 if r["forbidden_hits"]:
                     problems.append("出现禁词：" + "/".join(r["forbidden_hits"]))
             reply = (r["reply"] or "").replace("\n", " ")[:60] or "—"
-            a(f"| {r['id']} | {r['input']} | {r['expect']} | {r['branch'] or '—'} | "
-              f"{'✅' if r['keyword_hit'] else '❌'} | {'；'.join(problems)} | {reply} |")
+            a(f"| {md_cell(r['id'])} | {md_cell(r['input'])} | {md_cell(r['expect'])} | "
+              f"{md_cell(r['branch'] or '—')} | {'✅' if r['keyword_hit'] else '❌'} | "
+              f"{md_cell('；'.join(problems))} | {md_cell(reply)} |")
     a("")
 
     a("## 四、验收结论")

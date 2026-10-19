@@ -9,86 +9,78 @@
   :root {
     color-scheme: light;
 
-    --page-bg: linear-gradient(165deg, #F4F1EB 0%, #E8E3D9 100%);
-    --card: #FFFFFF;
+    --page-bg: #F1ECE2;
+    --paper: #F8F3EA;
+    --card: #FFFDF8;
 
-    --ink: #1B2422;
-    --ink-2: #4B5A53;
-    --muted: #8A938D;
-    --faint: #AAB2AC;
+    --ink: #1D2A25;
+    --ink-2: #4A5A52;
+    --muted: #7C8A82;
+    --faint: #A7B1AA;
 
-    --line: #F0ECE5;
-    --line-2: #E6E0D6;
-    --chat-bg: #F8F6F2;
-    --dot: rgba(42, 107, 92, 0.05);
+    --line: #E9E1D4;
+    --line-2: #DCD2C1;
+    --chat-bg: #FBF7EF;
+    --dot: rgba(46, 91, 76, 0.045);
 
-    --accent: #2A6B5C;
-    --accent-2: #35796A;
-    --accent-soft: #EAF3F0;
-    --accent-ring: rgba(42, 107, 92, 0.14);
-    --bubble: #FFFFFF;
-    --bubble-line: #EDE9E2;
+    --accent: #2E5B4C;
+    --accent-2: #3C705E;
+    --accent-soft: #E8F0EA;
+    --accent-ring: rgba(46, 91, 76, 0.16);
+    --bubble-line: #EDE5D8;
 
-    --notice-bg: #FBF7EE;
-    --notice-line: #F1E9D8;
-    --notice-ink: #8A7433;
-    --notice-icon: #B08A34;
+    --panel-a: #2A5145;
+    --panel-b: #1B382F;
+    --panel-ink: #F3EDE0;
+    --panel-muted: rgba(243, 237, 224, 0.66);
 
-    --header-a: #24564E;
-    --header-b: #2E7263;
-    --header-c: #3A8974;
+    --shadow-app:
+      0 40px 90px -42px rgba(29, 42, 37, 0.42),
+      0 6px 20px -12px rgba(29, 42, 37, 0.14);
+    --shadow-user: 0 6px 16px -8px rgba(27, 56, 47, 0.55);
 
-    --shadow-card:
-      0 28px 64px -24px rgba(28, 45, 40, 0.30),
-      0 4px 14px -6px rgba(28, 45, 40, 0.08);
-    --shadow-user: 0 6px 16px -8px rgba(36, 86, 78, 0.55);
-    --shadow-fab: 0 8px 20px -8px rgba(28, 45, 40, 0.35);
-
-    --radius-card: 28px;
-    --radius-bubble: 18px;
+    --radius-app: 30px;
+    --radius-card: 22px;
+    --radius-bubble: 16px;
     --radius-full: 999px;
 
-    --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --serif: "Songti SC", "Noto Serif SC", "Source Han Serif SC", "STSong", Georgia, serif;
   }
 
   @media (prefers-color-scheme: dark) {
     :root {
       color-scheme: dark;
 
-      --page-bg: linear-gradient(165deg, #14191A 0%, #0D1112 100%);
-      --card: #1A201E;
+      --page-bg: #0E1412;
+      --paper: #151C19;
+      --card: #1A211E;
 
-      --ink: #E7EDEA;
-      --ink-2: #B4C0BA;
-      --muted: #8A968F;
-      --faint: #6E7972;
+      --ink: #E9EFEA;
+      --ink-2: #B6C2BB;
+      --muted: #8D9A93;
+      --faint: #6E7B74;
 
-      --line: #262D2A;
-      --line-2: #303834;
-      --chat-bg: #151A19;
-      --dot: rgba(122, 224, 184, 0.05);
+      --line: #272F2B;
+      --line-2: #333C37;
+      --chat-bg: #151B18;
+      --dot: rgba(122, 224, 184, 0.045);
 
-      --accent: #4FBFA0;
-      --accent-2: #5FCDAF;
-      --accent-soft: rgba(79, 191, 160, 0.12);
-      --accent-ring: rgba(79, 191, 160, 0.20);
-      --bubble: #212927;
-      --bubble-line: #2E3633;
+      --accent: #63C3A4;
+      --accent-2: #79D2B5;
+      --accent-soft: rgba(99, 195, 164, 0.12);
+      --accent-ring: rgba(99, 195, 164, 0.22);
+      --bubble-line: #2C3531;
 
-      --notice-bg: #221E14;
-      --notice-line: #332C1C;
-      --notice-ink: #C7A75B;
-      --notice-icon: #A8873C;
+      --panel-a: #173029;
+      --panel-b: #0F221C;
+      --panel-ink: #E9EFEA;
+      --panel-muted: rgba(233, 239, 234, 0.62);
 
-      --header-a: #1B4A41;
-      --header-b: #255F52;
-      --header-c: #2E7263;
-
-      --shadow-card:
-        0 28px 64px -24px rgba(0, 0, 0, 0.60),
-        0 4px 14px -6px rgba(0, 0, 0, 0.35);
+      --shadow-app:
+        0 40px 90px -42px rgba(0, 0, 0, 0.75),
+        0 6px 20px -12px rgba(0, 0, 0, 0.45);
       --shadow-user: 0 6px 16px -8px rgba(0, 0, 0, 0.55);
-      --shadow-fab: 0 8px 20px -8px rgba(0, 0, 0, 0.55);
     }
   }
 
@@ -96,74 +88,185 @@
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
-    font-family: var(--font);
+    font-family: var(--sans);
     background: var(--page-bg);
     min-height: 100vh;
     display: grid;
     place-items: center;
-    padding: 24px 16px;
+    padding: 20px;
     color: var(--ink);
     -webkit-font-smoothing: antialiased;
   }
 
-  /* ================= 卡片外壳 ================= */
+  button { font-family: inherit; }
+
+  /* ================= 双栏外壳 ================= */
+  .app {
+    width: min(1160px, 100%);
+    height: min(800px, calc(100vh - 40px));
+    display: grid;
+    grid-template-columns: 0.92fr 1.08fr;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-app);
+    box-shadow: var(--shadow-app);
+    overflow: hidden;
+  }
+
+  /* ================= 左侧品牌栏 ================= */
+  .brand-panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 26px;
+    padding: 44px 42px;
+    color: var(--panel-ink);
+    background:
+      repeating-linear-gradient(115deg, rgba(255,255,255,0.028) 0 1px, transparent 1px 9px),
+      linear-gradient(158deg, var(--panel-a) 0%, var(--panel-b) 100%);
+    overflow: hidden;
+  }
+  .brand-panel::after {
+    content: "";
+    position: absolute;
+    right: -110px;
+    bottom: -140px;
+    width: 340px;
+    height: 340px;
+    border-radius: 50%;
+    border: 1px solid rgba(243, 237, 224, 0.14);
+    box-shadow: 0 0 0 44px rgba(243, 237, 224, 0.045);
+    pointer-events: none;
+  }
+
+  .brand-top { display: flex; align-items: center; gap: 13px; }
+  .brand-mark {
+    width: 42px; height: 42px;
+    flex: 0 0 42px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    border: 1px solid rgba(243, 237, 224, 0.42);
+    font-family: var(--serif);
+    font-size: 19px;
+    line-height: 1;
+    letter-spacing: 0;
+  }
+  .brand-name {
+    font-family: var(--serif);
+    font-size: 17px;
+    letter-spacing: 0.12em;
+    line-height: 1.2;
+  }
+  .brand-name span {
+    display: block;
+    margin-top: 3px;
+    font-family: var(--sans);
+    font-size: 9.5px;
+    letter-spacing: 0.26em;
+    color: var(--panel-muted);
+  }
+
+  .brand-copy { position: relative; z-index: 1; }
+  .brand-copy h1 {
+    font-family: var(--serif);
+    font-size: clamp(27px, 2.5vw, 34px);
+    font-weight: 600;
+    line-height: 1.45;
+    letter-spacing: 0.01em;
+  }
+  .brand-copy p.lede {
+    margin-top: 14px;
+    max-width: 26em;
+    font-size: 12.5px;
+    line-height: 1.85;
+    color: var(--panel-muted);
+  }
+
+  .promises { list-style: none; margin-top: 2px; }
+  .promises li {
+    position: relative;
+    padding: 9px 0 9px 16px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--panel-ink);
+  }
+  .promises li::before {
+    content: "";
+    position: absolute;
+    left: 2px;
+    top: 16px;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: rgba(243, 237, 224, 0.5);
+  }
+
+  .brand-foot {
+    position: relative;
+    z-index: 1;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    color: var(--panel-muted);
+  }
+
+  /* ================= 右侧聊天区 ================= */
+  .chat-shell {
+    padding: 20px;
+    background: var(--paper);
+    display: grid;
+    min-height: 0;
+  }
   .chat-container {
-    width: min(440px, 100%);
-    height: min(800px, calc(100vh - 48px));
+    width: 100%;
+    max-width: 560px;
+    margin: 0 auto;
+    height: 100%;
+    min-height: 0;
     background: var(--card);
     border: 1px solid var(--line);
     border-radius: var(--radius-card);
-    box-shadow: var(--shadow-card);
     display: flex;
     flex-direction: column;
     overflow: hidden;
   }
 
-  /* ================= 头部 ================= */
+  /* 头部 */
   .chat-header {
-    position: relative;
     flex: 0 0 auto;
-    padding: 19px 22px;
-    background: linear-gradient(135deg, var(--header-a) 0%, var(--header-b) 58%, var(--header-c) 100%);
-    color: #fff;
+    padding: 16px 20px;
     display: flex;
     align-items: center;
-    gap: 13px;
-    overflow: hidden;
-  }
-  .chat-header::after {
-    content: "";
-    position: absolute;
-    top: -78px; right: -46px;
-    width: 200px; height: 200px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(255, 255, 255, 0.18), transparent 68%);
-    pointer-events: none;
+    gap: 12px;
+    background: var(--card);
+    border-bottom: 1px solid var(--line);
   }
   .chat-header .avatar {
-    flex: 0 0 46px;
-    width: 46px; height: 46px;
+    flex: 0 0 42px;
+    width: 42px; height: 42px;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.20);
-    border: 1px solid rgba(255, 255, 255, 0.32);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
     display: grid;
     place-items: center;
-    font-size: 23px;
+    background: var(--accent);
+    color: #F6F2E9;
+    font-family: var(--serif);
+    font-size: 18px;
     line-height: 1;
   }
   .chat-header .info { min-width: 0; }
   .chat-header .info h1 {
+    font-family: var(--serif);
     font-size: 16px;
     font-weight: 600;
-    line-height: 1.4;
-    letter-spacing: 0.01em;
+    line-height: 1.35;
+    letter-spacing: 0.02em;
   }
   .chat-header .info p {
-    font-size: 12px;
+    font-size: 11.5px;
     line-height: 1.4;
-    opacity: 0.78;
-    margin-top: 1px;
+    color: var(--muted);
+    margin-top: 2px;
   }
   .status-pill {
     margin-left: auto;
@@ -171,54 +274,50 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 11px 5px 10px;
+    padding: 5px 10px;
     border-radius: var(--radius-full);
-    background: rgba(255, 255, 255, 0.16);
-    border: 1px solid rgba(255, 255, 255, 0.26);
+    background: var(--accent-soft);
+    color: var(--accent);
     font-size: 11px;
     font-weight: 500;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.04em;
     white-space: nowrap;
   }
   .status-pill i {
-    width: 7px; height: 7px;
+    width: 6px; height: 6px;
     border-radius: 50%;
-    background: #7BE0B8;
-    box-shadow: 0 0 0 3px rgba(123, 224, 184, 0.22);
+    background: #3E9C77;
+    box-shadow: 0 0 0 3px rgba(62, 156, 119, 0.16);
   }
 
-  /* ================= 提示条 ================= */
+  /* 提示条 */
   .online-bar {
     flex: 0 0 auto;
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 9px 20px;
-    background: var(--notice-bg);
-    border-bottom: 1px solid var(--notice-line);
+    gap: 10px;
+    padding: 7px 20px;
+    background: transparent;
+    border-bottom: 1px solid var(--line);
   }
-  .online-bar svg { flex: 0 0 auto; color: var(--notice-icon); }
   .online-bar span {
     flex: 1;
-    font-size: 11.5px;
-    line-height: 1.55;
-    color: var(--notice-ink);
+    min-width: 0;
+    font-size: 10.5px;
+    line-height: 1.6;
+    color: var(--muted);
   }
   .online-bar a {
     flex: 0 0 auto;
-    font-size: 11.5px;
-    font-weight: 600;
+    font-size: 10.5px;
     color: var(--accent);
     text-decoration: none;
-    padding: 4px 11px;
-    border-radius: var(--radius-full);
-    background: var(--accent-soft);
+    border-bottom: 1px solid var(--accent-ring);
     white-space: nowrap;
-    transition: filter 0.18s ease;
   }
-  .online-bar a:hover { filter: brightness(0.96); }
+  .online-bar a:hover { border-bottom-color: var(--accent); }
 
-  /* ================= 消息区 ================= */
+  /* 消息区 */
   .messages-wrap {
     position: relative;
     flex: 1;
@@ -228,10 +327,10 @@
   .chat-messages {
     flex: 1;
     overflow-y: auto;
-    padding: 20px 20px 6px;
+    padding: 20px 20px 8px;
     background: var(--chat-bg);
     background-image: radial-gradient(var(--dot) 1px, transparent 1px);
-    background-size: 22px 22px;
+    background-size: 24px 24px;
     overscroll-behavior: contain;
     scrollbar-width: thin;
     scrollbar-color: var(--line-2) transparent;
@@ -243,54 +342,6 @@
     border-radius: var(--radius-full);
   }
 
-  /* 日期分隔 */
-  .day-divider {
-    display: flex;
-    justify-content: center;
-    margin-bottom: 18px;
-  }
-  .day-divider span {
-    font-size: 10.5px;
-    color: var(--muted);
-    padding: 3px 11px;
-    border-radius: var(--radius-full);
-    background: var(--line);
-  }
-
-  /* 空状态引导 */
-  .empty-hint {
-    margin: 6px 0 20px;
-    padding: 14px 16px;
-    border: 1px dashed var(--line-2);
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.5);
-  }
-  .empty-hint .eh-title {
-    font-size: 11.5px;
-    font-weight: 600;
-    color: var(--muted);
-    letter-spacing: 0.03em;
-    margin-bottom: 9px;
-  }
-  .empty-hint ul { list-style: none; display: grid; gap: 7px; }
-  .empty-hint li {
-    font-size: 13px;
-    line-height: 1.55;
-    color: var(--ink-2);
-    cursor: pointer;
-    padding: 7px 11px;
-    border-radius: 10px;
-    background: var(--card);
-    border: 1px solid var(--line);
-    transition: border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
-  }
-  .empty-hint li:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-    transform: translateX(2px);
-  }
-  .empty-hint.hidden { display: none; }
-
   /* 消息 */
   .message {
     margin-bottom: 16px;
@@ -301,43 +352,37 @@
   .message.bot { align-items: flex-start; }
   .message.user { align-items: flex-end; }
   .message .bubble {
-    max-width: 82%;
+    max-width: 84%;
     padding: 11px 15px;
     border-radius: var(--radius-bubble);
-    font-size: 14px;
-    line-height: 1.68;
+    font-size: 13.5px;
+    line-height: 1.7;
     word-break: break-word;
-    white-space: pre-wrap;   /* 保留换行；配合 textContent 渲染，不依赖 <br> */
+    white-space: pre-wrap;
   }
   .message.bot .bubble {
-    background: var(--bubble);
+    background: var(--card);
     color: var(--ink);
     border: 1px solid var(--bubble-line);
-    border-bottom-left-radius: 6px;
-    box-shadow: 0 1px 2px rgba(28, 45, 40, 0.04);
+    border-bottom-left-radius: 5px;
+    box-shadow: 0 1px 2px rgba(29, 42, 37, 0.04);
   }
   .message.user .bubble {
-    background: linear-gradient(135deg, var(--accent-2), var(--accent));
-    color: #fff;
-    border-bottom-right-radius: 6px;
+    background: var(--accent);
+    color: #F7F4EC;
+    border-bottom-right-radius: 5px;
     box-shadow: var(--shadow-user);
   }
-  .message .time {
-    font-size: 10.5px;
-    color: var(--faint);
-    margin-top: 6px;
-    padding: 0 4px;
-    letter-spacing: 0.02em;
-  }
+  .message .time { display: none; }
 
   /* 流式光标 */
   .bubble.streaming::after {
     content: "";
     display: inline-block;
-    width: 6px; height: 14px;
+    width: 5px; height: 13px;
     margin-left: 3px;
     vertical-align: -2px;
-    border-radius: 1.5px;
+    border-radius: 1px;
     background: var(--accent);
     animation: caret 1s steps(1) infinite;
   }
@@ -345,7 +390,7 @@
   /* 正在输入 */
   .typing { display: inline-flex; align-items: center; gap: 5px; padding: 3px 1px; }
   .typing span {
-    width: 6px; height: 6px;
+    width: 5px; height: 5px;
     border-radius: 50%;
     background: var(--accent);
     opacity: 0.28;
@@ -367,7 +412,7 @@
     border: 1px solid var(--line-2);
     color: var(--accent);
     cursor: pointer;
-    box-shadow: var(--shadow-fab);
+    box-shadow: 0 8px 20px -10px rgba(29, 42, 37, 0.4);
     opacity: 0;
     transform: translateY(6px) scale(0.94);
     pointer-events: none;
@@ -376,60 +421,58 @@
   .to-bottom.show { opacity: 1; transform: none; pointer-events: auto; }
   .to-bottom:hover { border-color: var(--accent); }
 
-  /* ================= 快捷提问 ================= */
+  /* 快捷提问 */
   .quick-replies {
     flex: 0 0 auto;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 12px 20px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 11px 16px;
     background: var(--card);
     border-top: 1px solid var(--line);
   }
   .quick-reply {
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 5px;
-    padding: 7px 13px;
+    padding: 6px 8px;
     border-radius: var(--radius-full);
     background: var(--chat-bg);
-    border: 1px solid var(--line-2);
+    border: 1px solid transparent;
     color: var(--ink-2);
-    font-size: 12.5px;
+    font-size: 11.5px;
     font-weight: 500;
     cursor: pointer;
     white-space: nowrap;
-    transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+    transition: border-color 0.18s ease, color 0.18s ease, background 0.18s ease;
   }
-  .quick-reply .qi { font-size: 13px; line-height: 1; }
   .quick-reply:hover {
-    border-color: var(--accent);
+    border-color: var(--line-2);
     color: var(--accent);
     background: var(--accent-soft);
-    transform: translateY(-1px);
   }
-  .quick-reply:active { transform: translateY(0); }
 
-  /* ================= 输入区 ================= */
+  /* 输入区 */
   .chat-input {
     flex: 0 0 auto;
-    padding: 12px 16px 10px;
+    padding: 12px 18px 10px;
     background: var(--card);
     border-top: 1px solid var(--line);
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
-  .input-row { display: flex; align-items: center; gap: 10px; }
+  .input-row { display: flex; align-items: center; gap: 9px; }
   .chat-input input {
     flex: 1;
     min-width: 0;
-    padding: 12px 18px;
+    padding: 11px 16px;
     background: var(--chat-bg);
     border: 1px solid transparent;
     border-radius: var(--radius-full);
     font-family: inherit;
-    font-size: 14px;
+    font-size: 13.5px;
     color: var(--ink);
     outline: none;
     transition: background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
@@ -442,55 +485,49 @@
   }
   .chat-input button {
     flex: 0 0 auto;
-    width: 42px; height: 42px;
+    width: 40px; height: 40px;
     display: grid;
     place-items: center;
-    background: linear-gradient(135deg, var(--accent-2), var(--accent));
-    color: #fff;
+    background: var(--accent);
+    color: #F7F4EC;
     border: none;
     border-radius: 50%;
     cursor: pointer;
-    box-shadow: var(--shadow-user);
-    transition: transform 0.16s ease, filter 0.16s ease, opacity 0.16s ease, box-shadow 0.16s ease;
+    transition: background 0.16s ease, transform 0.16s ease, opacity 0.16s ease;
   }
-  .chat-input button:hover { filter: brightness(1.07); transform: translateY(-1px); }
-  .chat-input button:active { transform: translateY(0); filter: brightness(0.96); }
+  .chat-input button:hover { background: var(--accent-2); transform: translateY(-1px); }
+  .chat-input button:active { transform: translateY(0); }
   .chat-input button:disabled {
     background: var(--line-2);
     color: var(--muted);
-    box-shadow: none;
     cursor: default;
-    filter: none;
     transform: none;
-    opacity: 0.75;
+    opacity: 0.8;
   }
   .chat-input button:focus-visible,
   .quick-reply:focus-visible,
   .online-bar a:focus-visible,
-  .to-bottom:focus-visible,
-  .empty-hint li:focus-visible {
+  .to-bottom:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
   }
   .disclaimer {
     text-align: center;
-    font-size: 10.5px;
-    color: var(--faint);
-    letter-spacing: 0.02em;
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.05em;
   }
 
   /* 后端未就绪 / 不可用时的状态 */
   .notice-line {
     text-align: center;
-    font-size: 12px;
+    font-size: 11.5px;
     color: var(--muted);
     margin: 2px 0 14px;
   }
   .chat-input input:disabled { cursor: not-allowed; opacity: 0.65; }
   body[data-mode="checking"] .quick-reply,
-  body[data-mode="checking"] .empty-hint li,
-  body[data-mode="unavailable"] .quick-reply,
-  body[data-mode="unavailable"] .empty-hint li {
+  body[data-mode="unavailable"] .quick-reply {
     opacity: 0.45;
     pointer-events: none;
   }
@@ -512,98 +549,128 @@
     *, *::before, *::after { animation: none !important; transition: none !important; }
   }
 
-  /* ================= 移动端 ================= */
-  @media (max-width: 480px) {
+  /* ================= 响应式 ================= */
+  @media (max-width: 980px) {
     body { padding: 0; }
-    .chat-container {
-      width: 100%;
+    .app {
+      grid-template-columns: 1fr;
       height: 100vh;
       height: 100dvh;
       border: none;
       border-radius: 0;
       box-shadow: none;
     }
-    .chat-header { padding: 16px 18px; }
-    .chat-messages { padding: 16px 16px 6px; }
+    .brand-panel { display: none; }
+    .chat-shell { padding: 0; }
+    .chat-container {
+      max-width: none;
+      height: 100%;
+      border: none;
+      border-radius: 0;
+    }
+    .chat-header { padding: 14px 18px; }
+    .chat-messages { padding: 16px 16px 8px; }
     .quick-replies { padding: 10px 16px; }
-    .empty-hint li { font-size: 12.5px; }
+    .chat-input { padding: 10px 16px 8px; }
+    .message .bubble { font-size: 13.5px; }
+  }
+
+  @media (max-height: 720px) and (min-width: 981px) {
+    .brand-panel { padding: 32px 36px; gap: 18px; }
+    .brand-copy h1 { font-size: 25px; }
+    .brand-copy p.lede { margin-top: 10px; }
+    .promises li { padding: 9px 0 9px 16px; }
   }
 </style>
 </head>
 <body data-mode="checking">
 
-<div class="chat-container">
-  <!-- 头部 -->
-  <div class="chat-header">
-    <div class="avatar">🛏️</div>
-    <div class="info">
-      <h1>优眠小助手</h1>
-      <p>优眠家居 · 智能客服</p>
+<div class="app">
+
+  <!-- 左侧品牌栏（桌面端） -->
+  <aside class="brand-panel" aria-label="品牌介绍">
+    <div class="brand-top">
+      <div class="brand-mark" aria-hidden="true">眠</div>
+      <div class="brand-name">优眠家居<span>YOUMIAN HOME</span></div>
     </div>
-    <span class="status-pill"><i></i>在线</span>
-  </div>
 
-  <!-- 顶部说明 / 源码入口 -->
-  <div class="online-bar">
-    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-      <circle cx="12" cy="12" r="9"></circle>
-      <path d="M12 11v5M12 7.8h.01"></path>
-    </svg>
-    <span>本页为界面演示，项目完整实现（人设 Prompt / 知识库 / 对话流设计）见源码仓库</span>
-    <a href="https://github.com/sochikurimareki68-gif/ecommerce-ai-customer-service" target="_blank" rel="noopener">查看源码 →</a>
-  </div>
+    <div class="brand-copy">
+      <h1>把挑床品的琐碎，<br>交给懂面料的小助手。</h1>
+      <p class="lede">面料、尺寸、洗护、物流与售后，常见问题即时解答；拿不准时为你转接人工。</p>
+    </div>
 
-  <!-- 消息区 -->
-  <div class="messages-wrap">
-    <div class="chat-messages" id="messages">
-      <div class="day-divider"><span>今天</span></div>
+    <ul class="promises">
+      <li>六类意图即时分流，秒回商品与售后问题</li>
+      <li>50 条 FAQ 与 20 款商品资料，有据可依</li>
+      <li>答不上就转人工，不编造、不冒充</li>
+    </ul>
 
-      <div class="message bot">
-        <div class="bubble">亲，您好！😊 欢迎来到优眠家居，我是智能客服小助手。我可以帮您解答商品信息、洗护方式、发货物流、退换货等问题。请问有什么可以帮您的呢？</div>
-        <div class="time" id="welcome-time"></div>
+    <p class="brand-foot">示例演示 · 智能体由扣子 Coze 驱动</p>
+  </aside>
+
+  <!-- 右侧聊天区 -->
+  <div class="chat-shell">
+    <div class="chat-container">
+
+      <div class="chat-header">
+        <div class="avatar" aria-hidden="true">眠</div>
+        <div class="info">
+          <h1>优眠小助手</h1>
+          <p>优眠家居 · 智能客服</p>
+        </div>
+        <span class="status-pill"><i></i>在线</span>
       </div>
 
-      <div class="empty-hint" id="emptyHint">
-        <div class="eh-title">你可以这样问我</div>
-        <ul>
-          <li tabindex="0" onclick="sendQuick('1.5 米的床该选什么尺寸的四件套？')" onkeypress="if(event.key==='Enter') this.click()">1.5 米的床该选什么尺寸的四件套？</li>
-          <li tabindex="0" onclick="sendQuick('纯棉床品第一次洗要注意什么？')" onkeypress="if(event.key==='Enter') this.click()">纯棉床品第一次洗要注意什么？</li>
-          <li tabindex="0" onclick="sendQuick('现在有什么优惠活动？')" onkeypress="if(event.key==='Enter') this.click()">现在有什么优惠活动？</li>
-        </ul>
+      <!-- 顶部说明 / 源码入口 -->
+      <div class="online-bar">
+        <span>本页为界面演示，项目完整实现（人设 Prompt / 知识库 / 对话流设计）见源码仓库</span>
+        <a href="https://github.com/sochikurimareki68-gif/ecommerce-ai-customer-service" target="_blank" rel="noopener">查看源码 →</a>
       </div>
+
+      <!-- 消息区 -->
+      <div class="messages-wrap">
+        <div class="chat-messages" id="messages" aria-live="polite">
+          <div class="message bot">
+            <div class="bubble">亲，您好！😊 欢迎来到优眠家居，我是智能客服小助手。我可以帮您解答商品信息、洗护方式、发货物流、退换货等问题。请问有什么可以帮您的呢？</div>
+            <div class="time" id="welcome-time"></div>
+          </div>
+        </div>
+
+        <button class="to-bottom" id="toBottom" type="button" aria-label="回到最新消息">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 5v14"></path>
+            <path d="M5.5 12.5L12 19l6.5-6.5"></path>
+          </svg>
+        </button>
+      </div>
+
+      <!-- 快捷提问 -->
+      <div class="quick-replies" id="quickReplies">
+        <button class="quick-reply" type="button" onclick="sendQuick('四件套有哪些尺寸？')">商品咨询</button>
+        <button class="quick-reply" type="button" onclick="sendQuick('纯棉床品怎么洗？')">洗护方式</button>
+        <button class="quick-reply" type="button" onclick="sendQuick('多久能发货？')">发货时效</button>
+        <button class="quick-reply" type="button" onclick="sendQuick('退货流程是什么？')">退换货</button>
+        <button class="quick-reply" type="button" onclick="sendQuick('现在有什么优惠活动？')">优惠活动</button>
+        <button class="quick-reply" type="button" onclick="sendQuick('转人工客服')">转人工</button>
+      </div>
+
+      <!-- 输入区 -->
+      <div class="chat-input">
+        <div class="input-row">
+          <input type="text" id="input" placeholder="连接服务中…" autocomplete="off" disabled maxlength="500" onkeypress="if(event.key==='Enter') sendMessage()" aria-label="输入您的问题">
+          <button type="button" id="sendBtn" onclick="sendMessage()" aria-label="发送">
+            <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12 19.5V5"></path>
+              <path d="M5.5 11.5L12 5l6.5 6.5"></path>
+            </svg>
+          </button>
+        </div>
+        <p class="disclaimer">内容由 AI 生成，仅供参考</p>
+      </div>
+
     </div>
-
-    <button class="to-bottom" id="toBottom" type="button" aria-label="回到最新消息">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M12 5v14"></path>
-        <path d="M5.5 12.5L12 19l6.5-6.5"></path>
-      </svg>
-    </button>
   </div>
 
-  <!-- 快捷提问 -->
-  <div class="quick-replies" id="quickReplies">
-    <span class="quick-reply" onclick="sendQuick('四件套有哪些尺寸？')"><span class="qi">🛍️</span>商品咨询</span>
-    <span class="quick-reply" onclick="sendQuick('纯棉床品怎么洗？')"><span class="qi">🧺</span>洗护方式</span>
-    <span class="quick-reply" onclick="sendQuick('多久能发货？')"><span class="qi">🚚</span>发货时效</span>
-    <span class="quick-reply" onclick="sendQuick('退货流程是什么？')"><span class="qi">🔄</span>退换货</span>
-    <span class="quick-reply" onclick="sendQuick('现在有什么优惠活动？')"><span class="qi">🎁</span>优惠活动</span>
-    <span class="quick-reply" onclick="sendQuick('转人工客服')"><span class="qi">🎧</span>转人工</span>
-  </div>
-
-  <!-- 输入区 -->
-  <div class="chat-input">
-    <div class="input-row">
-      <input type="text" id="input" placeholder="连接服务中…" autocomplete="off" disabled maxlength="500" onkeypress="if(event.key==='Enter') sendMessage()">
-      <button type="button" id="sendBtn" onclick="sendMessage()" aria-label="发送">
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-          <path d="M12 19.5V5"></path>
-          <path d="M5.5 11.5L12 5l6.5 6.5"></path>
-        </svg>
-      </button>
-    </div>
-    <p class="disclaimer">内容由 AI 生成，仅供参考</p>
-  </div>
 </div>
 
 <script>
@@ -667,12 +734,6 @@
   msgBox.addEventListener('scroll', () => {
     toBottom.classList.toggle('show', !isNearBottom());
   });
-
-  // 发出第一条消息后，收起空状态引导
-  function hideEmptyHint() {
-    const hint = document.getElementById('emptyHint');
-    if (hint) hint.classList.add('hidden');
-  }
 
   // 发送快捷回复
   function sendQuick(text) {
@@ -759,7 +820,6 @@
     addMessage(text, 'user');
     inputEl.value = '';
     syncSendState();
-    hideEmptyHint();
 
     if (mode === 'live') {
       streamReply(text);

@@ -177,6 +177,9 @@ class SessionStore:
             self._sweep()
             fresh = not token or token not in self._data
             if fresh:
+                # _sweep 只能清理「插入前」已超限的情况，这里先腾出位置，保证不超过上限
+                while self._data and len(self._data) >= MAX_SESSIONS:
+                    self._data.pop(min(self._data, key=lambda t: self._data[t]["seen"]), None)
                 token = secrets.token_urlsafe(24)
                 self._data[token] = {
                     "user_id": f"web_{token[:12]}",   # 由服务端生成，客户端无法指定
@@ -240,7 +243,7 @@ SSL_CONTEXT = build_ssl_context()
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "YoumianProxy/1.3"   # 与项目当前版本对齐，方便线上排查
+    server_version = "YoumianProxy/1.6"   # 与项目当前版本对齐，方便线上排查
 
     # 本请求需要下发的 Set-Cookie（新建会话时才会设置）
     _pending_cookie = ""

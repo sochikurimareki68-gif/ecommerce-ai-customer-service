@@ -22,6 +22,10 @@ jobs:
           python -m py_compile server.py
           python -m py_compile eval/run_eval.py
 
+      - name: 单元测试
+        run: |
+          python -m unittest discover -s tests -t . -v
+
       - name: JSON 数据校验
         run: |
           python -m json.tool eval/dataset.json > /dev/null

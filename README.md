@@ -12,6 +12,19 @@
 
 > 智能体运行在扣子 Coze 平台，需在扣子账号内搭建使用。本仓库提供完整的人设 Prompt、知识库、对话流设计、评测数据集，可按文档完整复现。
 
+## 界面预览
+
+<p align="center">
+  <img src="docs/images/ui-home.jpg" width="62%" alt="桌面端：品牌介绍 + 客服对话双栏">
+  <img src="docs/images/ui-mobile.jpg" width="24%" alt="移动端：全屏对话">
+</p>
+
+<p align="center">
+  <img src="docs/images/ui-chat.jpg" width="86%" alt="真实对话效果：意图路由与尺寸推荐">
+  <br>
+  <sub>桌面端为品牌栏 + 对话双栏，窄屏自动收起品牌栏；快捷提问与引用式回答均为真实交互。</sub>
+</p>
+
 ## 功能
 
 - **六路意图路由**：选择器节点自带 LLM 意图识别，自动分类并路由到对应分支
@@ -68,18 +81,21 @@ ecommerce-ai-customer-service/
 ├── Procfile                    # 通用启动命令（Render / Railway / Heroku 系）
 ├── requirements.txt            # 声明无第三方依赖
 ├── .env.example                # 环境变量示例（复制为 .env 并填写令牌）
-├── .github/workflows/ci.yml    # CI：语法检查 + JSON 校验 + 评测脚本 smoke test
+├── .github/workflows/ci.yml    # CI：语法检查 + 单元测试 + JSON 校验 + 评测脚本 smoke test
+├── tests/
+│   └── test_server.py          # 后端单元测试（限流 / 会话 / SSE / 防护，30 条）
 ├── LICENSE                     # MIT 许可
 ├── eval/
 │   ├── dataset.json            # 评测数据集（30 条用例 + 分支关键词）
 │   ├── run_eval.py             # 自动化评测脚本（零依赖，可并发）
 │   └── report.md               # 评测报告（自动生成）
 ├── docs/
+│   ├── images/                 # README 界面截图
 │   ├── prompt-template.md      # 人设 Prompt 模板（7个模块）
 │   ├── faq-knowledge-base.md   # FAQ 知识库（50条，6大类）
 │   ├── product-catalog.md      # 商品目录与价格表（20款）
 │   ├── chatflow-design.md      # 六路条件判断对话流设计
-│   ├── test-cases.md           # 测试用例设计（25组，执行结果见 eval/）
+│   ├── test-cases.md           # 测试用例设计（25 组设计 + 5 条边界补充 = 30 条执行）
 │   └── integration-plan-v2.md  # v2.0 对接真实店铺方案（物流/人工/知识库同步）
 └── README.md
 ```
@@ -184,6 +200,16 @@ GitHub Pages 只能托管静态文件，跑不了后端，所以**真实对话�
 部署后端**不影响**原来的 GitHub Pages 页面——同一个 `index.html` 会先探测 `/api/health`：
 探到后端就走真实对话，探不到就自动降级为内置模拟回复的界面演示。所以两处可以同时存在。
 
+## 单元测试
+
+后端逻辑（限流、会话存储、来源校验、SSE 翻译、路径穿越）全部有离线测试，不调用扣子接口：
+
+```bash
+python3 -m unittest discover -s tests -t . -v
+```
+
+共 30 条，CI 每次推送都会执行。
+
 ## 效果评测（v1.3）
 
 用 `eval/` 下的数据集与脚本对智能体做自动化回归，量化意图路由与回复质量。
@@ -225,7 +251,7 @@ python3 eval/run_eval.py     # 终端 2：跑全部用例，结果写入 eval/re
 2. 整理 50 条电商客服 FAQ + 20 款商品目录，上传至知识库
 3. 创建六路条件判断对话流：意图识别 → 六条分支 → 代码合并 → 返回
 4. 将对话流绑定到智能体，配置消息处理规则与开场白
-5. 测试 25 组对话用例，覆盖六大意图，记录 BadCase 并优化
+5. 测试 25 组设计用例 + 5 条边界补充用例（共 30 条），覆盖六大意图，记录 BadCase 并优化
 6. 编写 HTML 前端页面，并在页面内提供源码入口
 7. 用 Python 标准库实现后端代理（`server.py`），令牌只留在服务端
 8. 部署：静态页面发到 GitHub Pages；需要真实对话则部署到任意支持 Python 的托管平台
@@ -237,6 +263,8 @@ python3 eval/run_eval.py     # 终端 2：跑全部用例，结果写入 eval/re
 
 ### 已完成的关键迭代
 
+- **v1.6 后端单元测试**：新增 `tests/test_server.py`（30 条），覆盖限流窗口与清理、会话生成与上限、来源校验、SSE 事件翻译、路径穿越；顺带修正会话上限的瞬时越界
+- **v1.5 界面重构**：桌面端改为「品牌介绍栏 + 对话卡片」双栏，窄屏自动收起品牌栏；移除重复的空状态清单、日期分隔与彩色图标，快捷提问改为 3×2 等宽按钮；补充界面截图、favicon 与分享摘要
 - **v1.3 效果评测**：新增 `eval/` 数据集与自动化回归脚本，30 条用例量化意图路由（96.7%）、关键信息覆盖（93.3%）与响应延迟
 - **v1.2 后端代理**：新增 `server.py`，令牌由服务端持有并流式转发扣子接口，前端不再接触密钥，公开网页也能安全对话
 - **v1.1 由工作流迁移为对话流**：获得原生多轮记忆，删除人设中冗余的"上下文补全"规则（人设由 11 模块精简为 7 模块）

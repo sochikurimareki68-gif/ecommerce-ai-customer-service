@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import argparse
+import http.cookiejar
 import json
 import statistics
 import ssl
@@ -40,6 +41,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DATASET = ROOT / "eval" / "dataset.json"
 REPORT = ROOT / "eval" / "report.md"
+MULTI_REPORT = ROOT / "eval" / "report-multi.md"
 
 # 单次请求最长等待（秒）。知识库类问题偶尔较慢。
 REQUEST_TIMEOUT = 120
@@ -89,10 +91,11 @@ def iter_sse_events(resp):
             data_lines.append(line[5:].strip())
 
 
-def ask(base_url: str, message: str) -> tuple[bool, str, float, str]:
+def ask(base_url: str, message: str, opener=None) -> tuple[bool, str, float, str]:
     """调用一次代理接口，返回 (是否成功, 回复文本, 耗时秒, 错误信息)。
 
-    不带 cookie，所以每次调用在服务端都是新会话 —— 正好保证用例之间互不影响。
+    不传 opener 时不带 cookie，每次调用在服务端都是新会话 —— 单轮用例靠这个保证互不影响。
+    多轮用例传入带 CookieJar 的 opener，让同一组的两句落在同一个会话里。
     """
     payload = json.dumps({"message": message}).encode("utf-8")
     req = urllib.request.Request(
@@ -104,7 +107,11 @@ def ask(base_url: str, message: str) -> tuple[bool, str, float, str]:
 
     started = time.perf_counter()
     try:
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=SSL_CONTEXT) as resp:
+        if opener is None:
+            resp_cm = urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT, context=SSL_CONTEXT)
+        else:
+            resp_cm = opener.open(req, timeout=REQUEST_TIMEOUT)
+        with resp_cm as resp:
             answer = ""
             for event, data in iter_sse_events(resp):
                 if event == "delta" and data:
@@ -182,6 +189,124 @@ def run_case(case: dict, base_url: str, branch_keywords: dict, forbidden: list[s
     result["forbidden_hits"] = [w for w in forbidden if w in reply]
     result["length_ok"] = 15 <= len(reply) <= 800
     return result
+
+
+# ----------------------------------------------------------------------
+# 多轮用例：同一会话连发两句，只看第二句有没有读懂上文
+# ----------------------------------------------------------------------
+# 两句之间的间隔（秒）。给会话落库留时间，也避开「单 IP 每分钟 6 次」。
+MULTI_TURN_GAP = 8
+
+
+def build_session_opener():
+    """带 CookieJar 的 opener：服务端通过 HttpOnly Cookie 认会话。"""
+    jar = http.cookiejar.CookieJar()
+    return urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(jar),
+        urllib.request.HTTPSHandler(context=SSL_CONTEXT),
+    )
+
+
+def run_multi_case(case: dict, base_url: str, forbidden: list[str]) -> dict:
+    """连发两轮，第二轮命中 expect_any 即视为读懂了上下文。"""
+    opener = build_session_opener()
+    replies: list[str] = []
+    latencies: list[float] = []
+    error = ""
+
+    for idx, question in enumerate(case["turns"]):
+        ok, reply, elapsed, err = False, "", 0.0, ""
+        for attempt in range(RETRY + 1):
+            ok, reply, elapsed, err = ask(base_url, question, opener=opener)
+            if ok or attempt >= RETRY:
+                break
+            # 被限流时等一个完整窗口，其他错误短重试
+            time.sleep(RATE_LIMIT_WAIT if is_rate_limited(err) else 3)
+        replies.append(reply)
+        latencies.append(round(elapsed, 1))
+        if not ok:
+            error = err or "调用失败"
+            break
+        if idx == 0:
+            time.sleep(MULTI_TURN_GAP)
+
+    second = replies[1] if len(replies) > 1 else ""
+    return {
+        "id": case["id"],
+        "turns": case["turns"],
+        "ok": not error,
+        "error": error,
+        "reply1": replies[0] if replies else "",
+        "reply2": second,
+        "context_hit": bool(second) and any(kw in second for kw in case["expect_any"]),
+        "forbidden_hits": [w for w in forbidden if w in second],
+        "elapsed2": latencies[1] if len(latencies) > 1 else 0,
+    }
+
+
+def summarize_multi(results: list[dict]) -> dict:
+    total = len(results)
+    ok = [r for r in results if r["ok"]]
+    lats = [r["elapsed2"] for r in ok if r["elapsed2"]]
+
+    def pct(n: int) -> str:
+        return f"{n / total * 100:.1f}%" if total else "—"
+
+    return {
+        "total": total,
+        "succeeded": len(ok),
+        "failed": total - len(ok),
+        "context_ok": sum(1 for r in ok if r["context_hit"]),
+        "clean_ok": sum(1 for r in ok if not r["forbidden_hits"]),
+        "latency_avg": round(statistics.mean(lats), 1) if lats else 0,
+        "context_pct": pct(sum(1 for r in ok if r["context_hit"])),
+        "clean_pct": pct(sum(1 for r in ok if not r["forbidden_hits"])),
+    }
+
+
+def write_multi_report(meta: dict, s: dict, results: list[dict]) -> None:
+    lines = []
+    a = lines.append
+
+    a("# 项目一 · 多轮对话评测报告")
+    a("")
+    a(f"> 生成时间：{meta['time']}　|　接口：`{meta['base']}`")
+    a(f"> 用例组数：{s['total']}（每组 2 句，共 {s['total'] * 2} 次请求）　|　成功：{s['succeeded']}　|　失败：{s['failed']}")
+    a("")
+
+    a("## 一、总体指标")
+    a("")
+    a("| 指标 | 结果 | 说明 |")
+    a("|------|------|------|")
+    a(f"| **多轮上下文正确率** | **{s['context_pct']}**（{s['context_ok']}/{s['succeeded']}） | 第二轮回复命中该组预期关键词 |")
+    a(f"| 回复规范性 | {s['clean_pct']}（{s['clean_ok']}/{s['succeeded']}） | 第二轮未出现禁词 |")
+    a(f"| 第二轮平均延迟 | {s['latency_avg']}s | 带上文后的响应耗时 |")
+    a("")
+
+    a("## 二、逐组明细")
+    a("")
+    a("| ID | 第一句 | 第二句 | 上下文命中 | 规范性 | 第二轮用时 | 第二轮回复摘要 |")
+    a("|----|-------|-------|-----------|-------|-----------|--------------|")
+    for r in results:
+        ctx = "✅" if r["context_hit"] else "❌"
+        clean = "✅" if (r["ok"] and not r["forbidden_hits"]) else "❌"
+        summary = (r["reply2"] or r["error"] or "—")[:60]
+        a(f"| {r['id']} | {md_cell(r['turns'][0])} | {md_cell(r['turns'][1])} | {ctx} | {clean} "
+          f"| {r['elapsed2']}s | {md_cell(summary)} |")
+    a("")
+
+    a("## 三、方法与局限")
+    a("")
+    a("- **会话保持**：每组新建一个 `CookieJar`，同一组两句复用同一个 HttpOnly Cookie，"
+      "服务端据此把第二轮接到同一个 `conversation_id` 上。")
+    a(f"- **节奏**：组内两句之间、以及相邻两组之间均间隔 {MULTI_TURN_GAP} 秒，避开「单 IP 每分钟 6 次」限流。")
+    a("- **判定**：只看第二轮是否命中该组预设关键词（如「那纯棉的呢」必须答纯棉洗护）；第一轮只作上下文铺垫，不单独计分。")
+    a("- **局限**：关键词只能证明「还在同一条业务线上」，不能证明指代完全正确"
+      "（例如把「1.8 米」错认成「1.5 米」时，只要出现价格仍会判过）。更严格的做法是把断言写成多关键词组合或人工抽检。")
+    a("- **失败排查**：某组第二轮答偏时，先确认对应节点的「会话历史」是否开启、对话流与智能体是否都已发布。")
+    a("")
+
+    MULTI_REPORT.write_text("\n".join(lines), encoding="utf-8")
 
 
 def summarize(results: list[dict]) -> dict:
@@ -332,15 +457,49 @@ def main() -> int:
     parser.add_argument("--base", default="http://localhost:3000", help="代理服务地址")
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 条用例")
     parser.add_argument("--workers", type=int, default=1, help="并发数，默认 1（避免触发单 IP 每分钟限流）")
+    parser.add_argument("--multi", action="store_true", help="跑多轮用例：同一会话连发两句，结果写入 eval/report-multi.md")
     args = parser.parse_args()
 
     data = json.loads(DATASET.read_text(encoding="utf-8"))
+    forbidden = data["forbidden"]
+
+    if args.multi:
+        groups = data.get("multi_turn_cases", [])
+        if args.limit:
+            groups = groups[: args.limit]
+        if not groups:
+            print("dataset.json 里没有 multi_turn_cases，无法跑多轮评测")
+            return 1
+
+        print(f"▶ 多轮评测开始：{len(groups)} 组 × 2 句 | 接口 {args.base}")
+        print("─" * 62)
+        multi_results: list[dict] = []
+        for idx, case in enumerate(groups, 1):
+            r = run_multi_case(case, args.base, forbidden)
+            multi_results.append(r)
+            flag = "✅" if (r["ok"] and r["context_hit"]) else "❌"
+            print(f"  [{idx}/{len(groups)}] {flag} {r['id']}  {case['turns'][1]:<14} {r['elapsed2']:>5.1f}s")
+            if idx < len(groups):
+                time.sleep(MULTI_TURN_GAP)
+
+        s_multi = summarize_multi(multi_results)
+        write_multi_report(
+            {"time": datetime.now().strftime("%Y-%m-%d %H:%M"), "base": args.base},
+            s_multi,
+            multi_results,
+        )
+        print("─" * 62)
+        print(f"多轮上下文正确率 : {s_multi['context_pct']}  ({s_multi['context_ok']}/{s_multi['total']})")
+        print(f"回复规范性       : {s_multi['clean_pct']}  ({s_multi['clean_ok']}/{s_multi['total']})")
+        print(f"第二轮平均延迟   : {s_multi['latency_avg']}s")
+        print(f"报告已写入       : {MULTI_REPORT}")
+        return 0
+
     cases = data["cases"]
     if args.limit:
         cases = cases[: args.limit]
 
     branch_keywords = data["branch_keywords"]
-    forbidden = data["forbidden"]
 
     print(f"▶ 评测开始：{len(cases)} 条用例 | 并发 {args.workers} | 接口 {args.base}")
     print("─" * 62)

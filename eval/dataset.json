@@ -10,6 +10,14 @@
     "其他兜底": ["正在为您转接", "欢迎来到优眠家居", "回答不了", "帮不了", "议价", "智能客服小助手", "转接人工"]
   },
   "forbidden": ["<parameter", "我是人工客服", "```", "<function", "user_message"],
+  "_multi_turn_comment": "多轮用例：同一 cookie 会话连发 turns 里的两句，只校验第二轮是否命中 expect_any（证明读懂了上文），由 run_eval.py --multi 执行，结果写入 eval/report-multi.md。",
+  "multi_turn_cases": [
+    { "id": "M01", "turns": ["天丝床品怎么洗？", "那纯棉的呢？"], "expect_any": ["纯棉", "40"] },
+    { "id": "M02", "turns": ["四件套有什么尺寸？", "1.8 米多少钱？"], "expect_any": ["1.8", "899", "599", "499"] },
+    { "id": "M03", "turns": ["我想退货", "运费谁出？"], "expect_any": ["运费", "承担"] },
+    { "id": "M04", "turns": ["多久能发货？", "新疆发吗？"], "expect_any": ["新疆", "EMS", "偏远"] },
+    { "id": "M05", "turns": ["现在有什么活动？", "能叠加吗？"], "expect_any": ["叠加"] }
+  ],
   "cases": [
     { "id": "P01", "expect_branch": "商品咨询", "input": "四件套有哪些尺寸？", "expect_any": ["尺寸", "cm"] },
     { "id": "P02", "expect_branch": "商品咨询", "input": "你们的被芯是什么材质的？", "expect_any": ["材质", "填充", "面料", "棉"] },

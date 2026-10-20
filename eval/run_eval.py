@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-项目一 · v1.3 效果评测
+项目一 · v1.7 效果评测
 ======================
 
 对 eval/dataset.json 中的用例逐条调用智能体，量化四个指标：
@@ -43,8 +43,14 @@ REPORT = ROOT / "eval" / "report.md"
 
 # 单次请求最长等待（秒）。知识库类问题偶尔较慢。
 REQUEST_TIMEOUT = 120
-# 失败重试次数
-RETRY = 1
+# 失败重试次数。限流（429）单独等一个完整窗口，避免 3 秒后重试仍然被拒。
+RETRY = 2
+RATE_LIMIT_WAIT = 65
+
+
+def is_rate_limited(error: str) -> bool:
+    """代理把限流原因写成人话，这里同时兼容状态码与提示文案。"""
+    return any(word in error for word in ("429", "太快", "上限", "额度"))
 
 
 def build_ssl_context() -> ssl.SSLContext:
@@ -148,7 +154,8 @@ def run_case(case: dict, base_url: str, branch_keywords: dict, forbidden: list[s
         if ok:
             break
         if attempt < RETRY:
-            time.sleep(3)
+            # 被限流时等一个完整窗口；其他错误短重试即可
+            time.sleep(RATE_LIMIT_WAIT if is_rate_limited(err) else 3)
 
     result = {
         "id": case_id,
@@ -222,7 +229,7 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     lines = []
     a = lines.append
 
-    a("# 项目一 · v1.3 效果评测报告")
+    a("# 项目一 · v1.7 效果评测报告")
     a("")
     a(f"> 生成时间：{meta['time']}　|　模型：{meta['model']}　|　接口：`{meta['base']}`")
     a(f"> 用例总数：{s['total']}　|　成功返回：{s['succeeded']}　|　失败：{s['failed']}")
@@ -321,10 +328,10 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="项目一 v1.3 效果评测")
+    parser = argparse.ArgumentParser(description="项目一 v1.7 效果评测")
     parser.add_argument("--base", default="http://localhost:3000", help="代理服务地址")
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 条用例")
-    parser.add_argument("--workers", type=int, default=3, help="并发数，默认 3")
+    parser.add_argument("--workers", type=int, default=1, help="并发数，默认 1（避免触发单 IP 每分钟限流）")
     args = parser.parse_args()
 
     data = json.loads(DATASET.read_text(encoding="utf-8"))

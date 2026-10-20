@@ -243,7 +243,7 @@ SSL_CONTEXT = build_ssl_context()
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "YoumianProxy/1.6"   # 与项目当前版本对齐，方便线上排查
+    server_version = "YoumianProxy/1.7"   # 与项目当前版本对齐，方便线上排查
 
     # 本请求需要下发的 Set-Cookie（新建会话时才会设置）
     _pending_cookie = ""
@@ -559,8 +559,15 @@ class Handler(BaseHTTPRequestHandler):
         # 极端情况：没有增量（例如只给了完成事件），一次性补发
         if not sent_delta and completed_answer:
             self._sse_send("delta", json.dumps({"content": completed_answer}, ensure_ascii=False))
+            sent_delta = True
         if conversation_id and not sent_meta:
             self._sse_send("meta", json.dumps({"conversation_id": conversation_id}, ensure_ascii=False))
+
+        # 上游流异常结束：既没有增量也没有完成事件。直接发 done 会让前端留下空白气泡，
+        # 这里改为下发 error，让用户看到明确提示而不是一段沉默。
+        if not sent_delta:
+            self._sse_send("error", json.dumps({"message": "响应超时了，请再发送一次～"}, ensure_ascii=False))
+            return
 
         self._sse_send("done", "[DONE]")
 

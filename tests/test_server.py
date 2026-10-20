@@ -293,7 +293,17 @@ class PumpStreamTest(unittest.TestCase):
         )
         server.Handler._pump_stream(fake, resp, "token")
         kinds = [e for e, _ in fake.events]
-        self.assertEqual(kinds, ["meta", "done"])
+        # 用户消息不算回答，流里没有可展示内容时应当报错而不是静默结束
+        self.assertEqual(kinds, ["meta", "error"])
+
+    def test_empty_stream_reports_error_instead_of_blank_done(self):
+        """上游既没有增量也没有完成事件时，不能只发 done 让前端留下空气泡。"""
+        fake = FakeSse()
+        resp = _sse_lines(("done", "[DONE]"))
+        server.Handler._pump_stream(fake, resp, "token")
+        kinds = [e for e, _ in fake.events]
+        self.assertEqual(kinds, ["error"])
+        self.assertIn("超时", json.loads(fake.events[0][1])["message"])
 
 
 # ----------------------------------------------------------------------

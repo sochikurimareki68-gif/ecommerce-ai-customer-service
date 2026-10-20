@@ -273,6 +273,20 @@
     color: var(--muted);
     margin-top: 2px;
   }
+  .reset-btn {
+    flex: 0 0 auto;
+    padding: 5px 10px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-full);
+    background: transparent;
+    color: var(--muted);
+    font-size: 11.5px;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: border-color .18s, color .18s;
+  }
+  .reset-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .reset-btn:disabled { opacity: .45; cursor: not-allowed; }
   .status-pill {
     margin-left: auto;
     flex: 0 0 auto;
@@ -294,6 +308,12 @@
     background: #3E9C77;
     box-shadow: 0 0 0 3px rgba(62, 156, 119, 0.16);
   }
+  .status-pill.is-warn { background: #F6EDE4; color: #8A5A2B; }
+  .status-pill.is-warn i { background: #C08642; box-shadow: 0 0 0 3px rgba(192, 134, 66, 0.16); }
+  .status-pill.is-off { background: #F4E4E1; color: #8C3A2E; }
+  .status-pill.is-off i { background: #B4553F; box-shadow: 0 0 0 3px rgba(180, 85, 63, 0.16); }
+  .retry-btn { border-color: var(--accent); color: var(--accent); }
+  .retry-btn[hidden] { display: none; }
 
   /* 提示条 */
   .online-bar {
@@ -574,6 +594,7 @@
       border-radius: 0;
     }
     .chat-header { padding: 14px 18px; }
+    .reset-btn { padding: 4px 8px; font-size: 11px; }
     .chat-messages { padding: 16px 16px 8px; }
     .quick-replies { padding: 10px 16px; }
     .chat-input { padding: 10px 16px 8px; }
@@ -623,7 +644,9 @@
           <h1>优眠小助手</h1>
           <p>优眠家居 · 智能客服</p>
         </div>
-        <span class="status-pill"><i></i>在线</span>
+        <span class="status-pill"><i></i><span id="statusText">在线</span></span>
+        <button class="reset-btn retry-btn" id="retryBtn" type="button" hidden>重新连接</button>
+        <button class="reset-btn" id="resetBtn" type="button" title="清空对话，开启新会话">清空对话</button>
       </div>
 
       <!-- 顶部说明 / 源码入口 -->
@@ -747,9 +770,82 @@
     sendMessage();
   }
 
+  // ---------- 清空对话 ----------
+  // 清空时：中断在途请求 + 通知服务端重置会话 + 复位界面。
+  // chatEpoch 用来防止被中断的请求把晚到的内容写进新会话。
+  let activeStream = null;
+  let chatEpoch = 0;
+  const WELCOME_TEXT = '亲，您好！😊 欢迎来到优眠家居，我是智能客服小助手。我可以帮您解答商品信息、洗护方式、发货物流、退换货等问题。请问有什么可以帮您的呢？';
+  const resetBtn = document.getElementById('resetBtn');
+  const retryBtn = document.getElementById('retryBtn');
+  const statusText = document.getElementById('statusText');
+
+  async function resetChat() {
+    resetBtn.disabled = true;
+    if (activeStream) {
+      activeStream.abort();
+      activeStream = null;
+    }
+    chatEpoch += 1;
+
+    try {
+      await fetch('/api/reset', { method: 'POST', credentials: 'same-origin' });
+    } catch (e) {
+      // 静态演示没有后端，忽略即可，界面照样清空
+    }
+
+    msgBox.innerHTML = '';
+    const wrap = document.createElement('div');
+    wrap.className = 'message bot';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = WELCOME_TEXT;
+    const timeEl = document.createElement('div');
+    timeEl.className = 'time';
+    timeEl.textContent = getTime();
+    wrap.appendChild(bubble);
+    wrap.appendChild(timeEl);
+    msgBox.appendChild(wrap);
+
+    inputEl.value = '';
+    syncSendState();
+    inputEl.focus();
+    resetBtn.disabled = false;
+  }
+  resetBtn.addEventListener('click', resetChat);
+
   // 按当前模式刷新提示条与输入区状态
   function applyMode() {
     document.body.dataset.mode = mode;
+
+    // 状态徽标：在线 / 演示 / 连接中 / 连接已断开
+    const pill = document.querySelector('.status-pill');
+    if (pill && statusText) {
+      if (mode === 'live') {
+        pill.className = 'status-pill';
+        statusText.textContent = '在线';
+      } else if (mode === 'demo') {
+        pill.className = 'status-pill';
+        statusText.textContent = '演示';
+      } else if (mode === 'unavailable') {
+        pill.className = 'status-pill is-off';
+        statusText.textContent = '连接已断开';
+      } else {
+        pill.className = 'status-pill is-warn';
+        statusText.textContent = '连接中';
+      }
+    }
+    // 只有断开/重连中才显示「重新连接」
+    if (retryBtn) {
+      retryBtn.hidden = !(mode === 'unavailable' || mode === 'checking');
+      retryBtn.disabled = (mode === 'checking') || retryCooldownActive;
+      if (mode === 'checking') {
+        retryBtn.textContent = '重连中…';
+      } else if (mode === 'unavailable' && !retryCooldownActive) {
+        retryBtn.textContent = '重新连接';
+      }
+    }
+
     const span = document.querySelector('.online-bar span');
     if (span) {
       if (mode === 'live' && tokenReady) {
@@ -759,7 +855,7 @@
       } else if (mode === 'demo') {
         span.textContent = '本页为界面演示，项目完整实现（人设 Prompt / 知识库 / 对话流设计）见源码仓库';
       } else if (mode === 'unavailable') {
-        span.textContent = '服务暂时不可用（后端未就绪），请稍后刷新页面重试';
+        span.textContent = '与服务端的连接已断开，点击右上角「重新连接」重试';
       } else {
         span.textContent = '正在连接服务…';
       }
@@ -767,8 +863,49 @@
     syncSendState();
     inputEl.placeholder = (mode === 'checking')
       ? '连接服务中…'
-      : (mode === 'unavailable' ? '服务暂不可用' : '输入您的问题…');
+      : (mode === 'unavailable' ? '服务已断开，请先重新连接' : '输入您的问题…');
   }
+
+  // 对话中途连不上后端：把界面切到「断开」状态，避免用户继续白发消息
+  function setConnectionLost() {
+    if (mode !== 'live') return;
+    mode = 'unavailable';
+    applyMode();
+  }
+
+  // 重连失败后的冷却：避免用户连点，每次重连都会打 30 次健康探测
+  const RETRY_COOLDOWN_MS = 10000;
+  let retryCooldownActive = false;
+  let retryCooldownTimer = null;
+
+  function startRetryCooldown() {
+    let left = Math.ceil(RETRY_COOLDOWN_MS / 1000);
+    retryCooldownActive = true;
+    retryBtn.disabled = true;
+    retryBtn.textContent = `稍后再试 (${left}s)`;
+    clearInterval(retryCooldownTimer);
+    retryCooldownTimer = setInterval(() => {
+      left -= 1;
+      if (left <= 0) {
+        clearInterval(retryCooldownTimer);
+        retryCooldownTimer = null;
+        retryCooldownActive = false;
+        retryBtn.textContent = '重新连接';
+        retryBtn.disabled = false;
+        return;
+      }
+      retryBtn.textContent = `稍后再试 (${left}s)`;
+    }, 1000);
+  }
+
+  // 点击「重新连接」：重新走一次健康探测（复用冷启动那套重试逻辑）
+  retryBtn.addEventListener('click', async () => {
+    if (retryCooldownActive) return;
+    mode = 'checking';
+    applyMode();
+    await checkBackend();   // 内部成功会切回 live / demo，失败落到 unavailable
+    if (mode === 'unavailable') startRetryCooldown();
+  });
 
   // 单次健康探测：ok = 可用；static = 确认没有后端；down = 后端存在但还没就绪
   async function probeHealth(timeoutMs) {
@@ -818,7 +955,7 @@
 
     // 后端还没就绪 / 不可用时，明确告知，绝不回模拟答案冒充真实回答
     if (mode === 'checking') { addNotice('正在连接服务，请稍候…'); return; }
-    if (mode === 'unavailable') { addNotice('服务暂时不可用，请稍后刷新页面重试。'); return; }
+    if (mode === 'unavailable') { addNotice('服务已断开，请点右上角「重新连接」后再试。'); return; }
     if (sendBtn.dataset.busy === '1') return;   // 上一条还在生成中
 
     // 显示用户消息
@@ -844,6 +981,9 @@
     let bubble = null;      // 机器人气泡元素
     let answer = '';        // 已累积的回复文本
     let errored = false;    // 后端已返回错误提示时，不再叠加兜底话术
+    const myEpoch = chatEpoch;         // 本轮所属的会话世代
+    const ctrl = new AbortController();
+    activeStream = ctrl;
 
     sendBtn.dataset.busy = '1';
     sendBtn.disabled = true;
@@ -867,7 +1007,8 @@
         method: 'POST',
         credentials: 'same-origin',   // 带上服务端下发的会话 cookie
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage })
+        body: JSON.stringify({ message: userMessage }),
+        signal: ctrl.signal
       });
 
       if (!resp.ok || !resp.body) {
@@ -899,6 +1040,7 @@
             else if (line.startsWith('data:')) data += line.slice(5).trim();
           }
           if (!event) continue;
+          if (chatEpoch !== myEpoch) return;   // 用户已点「清空对话」，旧回复不再渲染
 
           // 代理下发四类事件：meta / delta / error / done。
           // meta 里的 conversation_id 由服务端管理（见 server.py SessionStore），
@@ -921,6 +1063,7 @@
         }
       }
 
+      if (chatEpoch !== myEpoch) return;
       if (!answer && !errored) {
         ensureBubble().textContent = '亲，这个问题我需要帮您转接人工客服确认一下，请稍等哦~ 您也可以拨打客服热线 400-XXX-XXXX（工作日9:00-18:00）😊';
       }
@@ -933,14 +1076,18 @@
     } catch (error) {
       removeTyping(typingId);
       if (bubble) bubble.classList.remove('streaming');
+      if (error && error.name === 'AbortError') return;   // 被「清空对话」中断，属正常
       addMessage(
         error && error.fromServer
           ? '亲，' + error.message
           : '抱歉，系统暂时无法连接，请稍后再试或拨打客服热线 400-XXX-XXXX。',
         'bot'
       );
+      // 网络层失败（不是后端明确报错）说明连接断了：切换界面状态并给出重连入口
+      if (!error || !error.fromServer) setConnectionLost();
       console.error(error);
     } finally {
+      if (activeStream === ctrl) activeStream = null;
       sendBtn.dataset.busy = '';
       syncSendState();
     }

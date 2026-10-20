@@ -138,6 +138,46 @@ class RateLimiterTest(unittest.TestCase):
 
 
 # ----------------------------------------------------------------------
+# HealthLimiter
+# ----------------------------------------------------------------------
+class HealthLimiterTest(unittest.TestCase):
+    def test_allows_up_to_limit_then_blocks(self):
+        limiter = server.HealthLimiter()
+        with mock.patch.object(server, "HEALTH_PER_MINUTE", 2):
+            self.assertTrue(limiter.allow("1.1.1.1"))
+            self.assertTrue(limiter.allow("1.1.1.1"))
+            self.assertFalse(limiter.allow("1.1.1.1"))
+
+    def test_different_ips_are_independent(self):
+        limiter = server.HealthLimiter()
+        with mock.patch.object(server, "HEALTH_PER_MINUTE", 1):
+            self.assertTrue(limiter.allow("1.1.1.1"))
+            self.assertFalse(limiter.allow("1.1.1.1"))
+            self.assertTrue(limiter.allow("2.2.2.2"))
+
+    def test_window_expires_after_one_minute(self):
+        limiter = server.HealthLimiter()
+        with mock.patch.object(server, "HEALTH_PER_MINUTE", 1), \
+             mock.patch.object(server.time, "time", return_value=1000.0):
+            self.assertTrue(limiter.allow("1.1.1.1"))
+            self.assertFalse(limiter.allow("1.1.1.1"))
+            with mock.patch.object(server.time, "time", return_value=1061.0):
+                self.assertTrue(limiter.allow("1.1.1.1"))
+
+    def test_stale_entries_are_cleaned_when_blocked(self):
+        """被刷时也要清理过期 IP，避免字典无限增长。"""
+        limiter = server.HealthLimiter()
+        with mock.patch.object(server, "HEALTH_PER_MINUTE", 1), \
+             mock.patch.object(server.time, "time", return_value=1000.0):
+            limiter.allow("old-ip")
+        with mock.patch.object(server, "HEALTH_PER_MINUTE", 1), \
+             mock.patch.object(server.time, "time", return_value=1100.0):
+            limiter.allow("new-ip")
+            limiter.allow("new-ip")      # 触发拒绝分支
+        self.assertNotIn("old-ip", limiter._hits)
+
+
+# ----------------------------------------------------------------------
 # SessionStore
 # ----------------------------------------------------------------------
 class SessionStoreTest(unittest.TestCase):
@@ -164,6 +204,32 @@ class SessionStoreTest(unittest.TestCase):
         _, _, conversation_id, fresh = store.resolve(token)
         self.assertEqual(conversation_id, "conv-123")
         self.assertFalse(fresh)
+
+    def test_reset_clears_conversation_and_bumps_epoch(self):
+        store = server.SessionStore()
+        token, _, _, _ = store.resolve("")
+        store.set_conversation(token, "conv-123")
+        before = store.epoch(token)
+        after = store.reset(token)
+        self.assertEqual(after, before + 1)
+        _, _, conversation_id, _ = store.resolve(token)
+        self.assertEqual(conversation_id, "")
+        self.assertEqual(store.epoch(token), after)
+
+    def test_stale_epoch_cannot_overwrite_conversation(self):
+        """清空后，在途请求晚到的 conversation_id 必须被丢弃。"""
+        store = server.SessionStore()
+        token, _, _, _ = store.resolve("")
+        stale = store.epoch(token)
+        store.reset(token)
+        store.set_conversation(token, "conv-old", stale)
+        _, _, conversation_id, _ = store.resolve(token)
+        self.assertEqual(conversation_id, "")
+
+        # 新世代的写入应当正常生效
+        store.set_conversation(token, "conv-new", store.epoch(token))
+        _, _, conversation_id, _ = store.resolve(token)
+        self.assertEqual(conversation_id, "conv-new")
 
     def test_unknown_token_creates_new_session(self):
         store = server.SessionStore()
@@ -340,6 +406,18 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertTrue(data["ok"])
         self.assertIn("max_message_chars", data)
 
+    def test_health_is_rate_limited_per_ip(self):
+        server.HEALTH_LIMITER._hits.clear()
+        try:
+            with mock.patch.object(server, "HEALTH_PER_MINUTE", 1):
+                first, _ = self._request("GET", "/api/health")
+                second, body = self._request("GET", "/api/health")
+        finally:
+            server.HEALTH_LIMITER._hits.clear()
+        self.assertEqual(first, 200)
+        self.assertEqual(second, 429)
+        self.assertIn("频繁", json.loads(body)["error"])
+
     def test_path_traversal_is_blocked(self):
         status, body = self._request("GET", "/../server.py")
         self.assertEqual(status, 403)
@@ -351,6 +429,15 @@ class ServerIntegrationTest(unittest.TestCase):
         data = json.loads(body)
         self.assertEqual(status, 500)
         self.assertIn("COZE_API_TOKEN", data["error"])
+
+    def test_reset_endpoint_works_without_token(self):
+        """清空会话不依赖扣子令牌，后端不可用时也应能重置本地会话。"""
+        with mock.patch.object(server, "COZE_API_TOKEN", ""):
+            status, body = self._request("POST", "/api/reset")
+        data = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertTrue(data["ok"])
+        self.assertIn("epoch", data)
 
 
 if __name__ == "__main__":

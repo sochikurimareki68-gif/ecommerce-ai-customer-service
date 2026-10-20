@@ -83,6 +83,7 @@ MAX_MESSAGE_CHARS = int(os.environ.get("MAX_MESSAGE_CHARS", "500"))
 IP_PER_MINUTE = int(os.environ.get("IP_PER_MINUTE", "6"))
 IP_PER_DAY = int(os.environ.get("IP_PER_DAY", "60"))
 GLOBAL_PER_DAY = int(os.environ.get("GLOBAL_PER_DAY", "500"))
+HEALTH_PER_MINUTE = int(os.environ.get("HEALTH_PER_MINUTE", "30"))
 # 会话 Cookie 是否强制加 Secure；留空则按请求的 X-Forwarded-Proto 自动判断（HTTPS 部署加，本地不加）
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "").strip().lower() in ("1", "true", "yes")
 EXTRA_ORIGINS = [
@@ -147,6 +148,45 @@ class RateLimiter:
 LIMITER = RateLimiter()
 
 
+class HealthLimiter:
+    """健康检查专用限流：只按 IP 做每分钟窗口。
+
+    单独一套，原因有两个：
+    1. /api/health 不该占用「每日提问额度」（P0-3 的定时探活会一直打它）；
+    2. 前端一次「重新连接」会连续探测约 30 次，正常使用不能因此被拒。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._hits: dict[str, deque] = {}
+
+    def allow(self, ip: str) -> bool:
+        with self._lock:
+            now = time.time()
+            hits = self._hits.get(ip)
+            if hits is not None:
+                while hits and now - hits[0] > 60:
+                    hits.popleft()
+                if not hits:
+                    self._hits.pop(ip, None)
+                    hits = None
+            if hits is None:
+                hits = deque()
+
+            if len(hits) >= HEALTH_PER_MINUTE:
+                # 被刷时顺手清理过期条目，避免字典无限增长
+                for other in [k for k, dq in self._hits.items() if not dq or now - dq[-1] > 60]:
+                    self._hits.pop(other, None)
+                return False
+
+            hits.append(now)
+            self._hits[ip] = hits
+            return True
+
+
+HEALTH_LIMITER = HealthLimiter()
+
+
 # ----------------------------------------------------------------------
 # 会话（由服务端持有）
 #
@@ -184,17 +224,39 @@ class SessionStore:
                 self._data[token] = {
                     "user_id": f"web_{token[:12]}",   # 由服务端生成，客户端无法指定
                     "conversation_id": "",
+                    "epoch": 0,                       # 会话世代：reset 后 +1，用于丢弃在途请求的晚到结果
                     "seen": time.time(),
                 }
             session = self._data[token]
             session["seen"] = time.time()
             return token, session["user_id"], session["conversation_id"], fresh
 
-    def set_conversation(self, token: str, conversation_id: str) -> None:
+    def reset(self, token: str) -> int:
+        """清空会话上下文并让世代 +1，返回新世代。"""
         with self._lock:
             session = self._data.get(token)
-            if session:
-                session["conversation_id"] = conversation_id
+            if not session:
+                return 0
+            session["epoch"] = session.get("epoch", 0) + 1
+            session["conversation_id"] = ""
+            session["seen"] = time.time()
+            return session["epoch"]
+
+    def epoch(self, token: str) -> int:
+        with self._lock:
+            session = self._data.get(token)
+            return session.get("epoch", 0) if session else 0
+
+    def set_conversation(self, token: str, conversation_id: str, epoch: int | None = None) -> None:
+        with self._lock:
+            session = self._data.get(token)
+            if not session:
+                return
+            # 世代对不上，说明这轮对话期间用户点了「清空」，
+            # 旧会话的 conversation_id 不能再写回去，否则新会话会被污染。
+            if epoch is not None and session.get("epoch", 0) != epoch:
+                return
+            session["conversation_id"] = conversation_id
 
 
 SESSIONS = SessionStore()
@@ -243,7 +305,7 @@ SSL_CONTEXT = build_ssl_context()
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "YoumianProxy/1.7"   # 与项目当前版本对齐，方便线上排查
+    server_version = "YoumianProxy/1.8"   # 与项目当前版本对齐，方便线上排查
 
     # 本请求需要下发的 Set-Cookie（新建会话时才会设置）
     _pending_cookie = ""
@@ -310,6 +372,13 @@ class Handler(BaseHTTPRequestHandler):
                 return value
         return ""
 
+    def _session_cookie(self, token: str) -> str:
+        cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}"
+        # HTTPS 部署下加 Secure（含反向代理场景）；本地 HTTP 不加，COOKIE_SECURE 强制开启
+        if COOKIE_SECURE or self.headers.get("X-Forwarded-Proto") == "https":
+            cookie += "; Secure"
+        return cookie
+
     def _origin_allowed(self) -> bool:
         """校验请求来源。
 
@@ -330,6 +399,9 @@ class Handler(BaseHTTPRequestHandler):
         self._pending_cookie = ""      # 同一连接会连续处理多个请求，进入时必须清空
         path = urlparse(self.path).path
         if path == "/api/health":
+            if not HEALTH_LIMITER.allow(self._client_ip()):
+                self._reject(429, "健康检查太频繁，请稍后再试")
+                return
             self._send_json(200, {
                 "ok": True,
                 "bot_id": COZE_BOT_ID,
@@ -345,6 +417,9 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/api/chat":
             self._handle_chat()
+            return
+        if path == "/api/reset":
+            self._handle_reset()
             return
         self._reject(404, "接口不存在")
 
@@ -379,6 +454,24 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(data)
+
+    # ------------------------------------------------------------------
+    # 清空会话
+    # ------------------------------------------------------------------
+    def _handle_reset(self) -> None:
+        """清空当前会话上下文（前端「清空对话」）。
+
+        只清服务端的 conversation_id，并让会话世代 +1：
+        在途请求即使晚到，也会因为世代不匹配被 set_conversation 丢弃。
+        """
+        if not self._origin_allowed():
+            self._reject(403, "请求来源不被允许")
+            return
+
+        token, _, _, _ = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
+        epoch = SESSIONS.reset(token)
+        self._pending_cookie = self._session_cookie(token)
+        self._send_json(200, {"ok": True, "epoch": epoch})
 
     # ------------------------------------------------------------------
     # 对话代理
@@ -420,11 +513,8 @@ class Handler(BaseHTTPRequestHandler):
         # 身份与会话都由服务端决定：客户端传什么都不采信。
         # 每次都下发 cookie —— 会话有效时相当于刷新有效期，用户持续使用就不会掉线。
         token, user_id, conversation_id, _ = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
-        cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}"
-        # HTTPS 部署下加 Secure（含反向代理场景）；本地 HTTP 不加，COOKIE_SECURE 强制开启
-        if COOKIE_SECURE or self.headers.get("X-Forwarded-Proto") == "https":
-            cookie += "; Secure"
-        self._pending_cookie = cookie
+        epoch = SESSIONS.epoch(token)          # 记录本轮所处的会话世代
+        self._pending_cookie = self._session_cookie(token)
 
         body = {
             "bot_id": COZE_BOT_ID,
@@ -481,7 +571,7 @@ class Handler(BaseHTTPRequestHandler):
 
         self._sse_start()
         try:
-            self._pump_stream(resp, token)
+            self._pump_stream(resp, token, epoch)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass  # 用户中途关掉页面，正常情况
         except (OSError, http.client.IncompleteRead):
@@ -498,7 +588,7 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
-    def _pump_stream(self, resp, token: str) -> None:
+    def _pump_stream(self, resp, token: str, epoch: int | None = None) -> None:
         """把扣子的 SSE 事件翻译成前端更简单的三类事件：meta / delta / error。"""
         event = ""
         conversation_id = ""
@@ -540,7 +630,7 @@ class Handler(BaseHTTPRequestHandler):
             conversation_id = msg.get("conversation_id") or conversation_id
             if conversation_id and not sent_meta:
                 # 记在服务端，下一轮由服务端自己带上，不依赖客户端回传
-                SESSIONS.set_conversation(token, conversation_id)
+                SESSIONS.set_conversation(token, conversation_id, epoch)
                 self._sse_send("meta", json.dumps({"conversation_id": conversation_id}, ensure_ascii=False))
                 sent_meta = True
 

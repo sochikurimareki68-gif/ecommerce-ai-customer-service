@@ -83,7 +83,7 @@ ecommerce-ai-customer-service/
 ├── .env.example                # 环境变量示例（复制为 .env 并填写令牌）
 ├── .github/workflows/ci.yml    # CI：语法检查 + 单元测试 + JSON 校验 + 评测脚本 smoke test
 ├── tests/
-│   └── test_server.py          # 后端单元测试（限流 / 会话 / SSE / 防护，31 条）
+│   └── test_server.py          # 后端单元测试（限流 / 会话 / SSE / 防护，39 条）
 ├── LICENSE                     # MIT 许可
 ├── eval/
 │   ├── dataset.json            # 评测数据集（31 条单轮 + 5 组多轮 + 分支关键词）
@@ -119,6 +119,8 @@ open http://localhost:3000       # macOS
 ```
 
 `server.py` 同时承担两件事：托管静态页面 + 提供 `POST /api/chat` 流式转发扣子接口。
+另有 `POST /api/reset`：清空当前会话（丢弃 `conversation_id` 并让会话世代 +1），供页面右上角「清空对话」使用。
+`GET /api/health` 单独限流（默认单 IP 每分钟 30 次），不占提问额度，供前端重连与后续定时探活使用。
 页面加载时会探测 `/api/health`——探测成功走真实对话，失败（例如部署在 GitHub Pages）则自动降级为内置模拟回复的界面演示。
 
 ### 为什么需要后端代理
@@ -144,6 +146,7 @@ open http://localhost:3000       # macOS
 | `IP_PER_MINUTE` | `6` | 单 IP 每分钟提问上限 |
 | `IP_PER_DAY` | `60` | 单 IP 每天提问上限 |
 | `GLOBAL_PER_DAY` | `500` | 全站每日提问总量上限（兜底止损） |
+| `HEALTH_PER_MINUTE` | `30` | 单 IP 每分钟 `/api/health` 上限（独立计数，不占提问额度） |
 | `ALLOWED_ORIGINS` | （空） | 额外允许的来源域名，逗号分隔 |
 | `COZE_CA_BUNDLE` | （空） | 自定义 CA 证书路径；本地证书校验失败（certificate verify failed）时手动指定 |
 | `COOKIE_SECURE` | （空） | 强制给会话 Cookie 加 `Secure`（`1`/`true`/`yes`）；留空则按请求的 `X-Forwarded-Proto` 自动判断（HTTPS 部署自动加，本地不加） |
@@ -209,7 +212,7 @@ GitHub Pages 只能托管静态文件，跑不了后端，所以**真实对话�
 python3 -m unittest discover -s tests -t . -v
 ```
 
-共 31 条，CI 每次推送都会执行。
+共 39 条，CI 每次推送都会执行。
 
 ## 效果评测（v1.7）
 
@@ -275,6 +278,7 @@ python3 eval/run_eval.py --multi       # 跑 5 组多轮用例 → eval/report-m
 
 ### 已完成的关键迭代
 
+- **v1.8 清空会话 + 断线状态**：新增 `POST /api/reset` 与页面右上角「清空对话」。只刷新页面并不能清会话（HttpOnly Cookie 还在），现在会丢弃 `conversation_id` 并让会话世代 +1；在途请求的晚到结果会被世代校验丢弃。另外补了断线处理：对话中途连不上后端时，状态徽标切为「连接已断开」、输入框置灰，并出现「重新连接」按钮；重连期间按钮禁用，失败后进入 10 秒冷却，避免连点触发多次健康探测。`/api/health` 也加了独立限流（单 IP 每分钟 30 次，不占提问额度），挡住脚本刷健康接口（新增 5 条单测）
 - **v1.7.1 多轮自动化 + 认证口径**：`run_eval.py` 增加 `--multi`（同会话连发两句，5 组），首轮 5/5 通过并生成 `eval/report-multi.md`；新增 P06 认证用例，商品咨询节点补「认证/检测/资质/产地只照抄知识库名称与编号」口径
 - **v1.7 多轮上下文修复**：排查发现 7 个节点「会话历史」全部未开启，导致「天丝床品怎么洗」→「那纯棉的呢」被误判为商品咨询；已全部开启，并给兜底节点补挂 FAQ 技能、去掉代码节点的 800 字硬截断与遗留替换补丁、补空回复兜底文案；后端修掉「上游流异常结束只发 done」导致的空白气泡，改为下发 error 提示（新增 1 条单测）
 - **v1.6 后端单元测试**：新增 `tests/test_server.py`（30 条），覆盖限流窗口与清理、会话生成与上限、来源校验、SSE 事件翻译、路径穿越；顺带修正会话上限的瞬时越界

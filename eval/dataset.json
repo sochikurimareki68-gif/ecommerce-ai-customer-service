@@ -16,6 +16,7 @@
     { "id": "P03", "expect_branch": "商品咨询", "input": "1.8米的床应该选多大尺寸？", "expect_any": ["尺寸", "cm", "被套"] },
     { "id": "P04", "expect_branch": "商品咨询", "input": "我想买一套床品，有什么推荐？", "expect_any": ["推荐", "套件", "建议"] },
     { "id": "P05", "expect_branch": "商品咨询", "input": "枕芯和枕套有什么区别？", "expect_any": ["枕"] },
+    { "id": "P06", "expect_branch": "商品咨询", "input": "你们家产品有认证吗？", "expect_any": ["OEKO-TEX", "ISO 9001"] },
 
     { "id": "W01", "expect_branch": "洗护指南", "input": "纯棉床品怎么洗？", "expect_any": ["洗", "水温", "洗涤"] },
     { "id": "W02", "expect_branch": "洗护指南", "input": "床单多久洗一次比较好？", "expect_any": ["洗", "周", "更换"] },

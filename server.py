@@ -305,7 +305,7 @@ SSL_CONTEXT = build_ssl_context()
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "YoumianProxy/1.8"   # 与项目当前版本对齐，方便线上排查
+    server_version = "YoumianProxy/1.9"   # 与项目当前版本对齐，方便线上排查
 
     # 本请求需要下发的 Set-Cookie（新建会话时才会设置）
     _pending_cookie = ""
@@ -595,6 +595,11 @@ class Handler(BaseHTTPRequestHandler):
         sent_meta = False
         sent_delta = False
         completed_answer = ""
+        branch = ""
+        # 结束节点有两种返回形态：纯文本（reply）与结构化 JSON（reply + branch）。
+        # 结构化时 delta 里是 JSON 片段，必须先攒齐再解析，否则会把花括号吐给用户。
+        structured = None
+        pieces: list[str] = []
 
         for raw in resp:
             line = raw.decode("utf-8", "replace").rstrip("\r\n")
@@ -639,12 +644,27 @@ class Handler(BaseHTTPRequestHandler):
 
             if event == "conversation.message.delta":
                 piece = msg.get("content") or ""
-                if piece:
+                if not piece:
+                    continue
+                if structured is None:
+                    structured = piece.lstrip().startswith("{")
+                if structured:
+                    pieces.append(piece)
+                else:
                     self._sse_send("delta", json.dumps({"content": piece}, ensure_ascii=False))
                     sent_delta = True
             else:
                 # 完成事件里带的是整段回复，作为兜底
                 completed_answer = msg.get("content") or completed_answer
+
+        if structured:
+            reply, branch = self._split_structured(completed_answer or "".join(pieces))
+            if not reply:
+                # 解析失败不能把 JSON 原样丢给用户，给一句明确的提示
+                self._sse_send("error", json.dumps({"message": "回复格式异常，请再发送一次～"}, ensure_ascii=False))
+                return
+            self._sse_send("delta", json.dumps({"content": reply}, ensure_ascii=False))
+            sent_delta = True
 
         # 极端情况：没有增量（例如只给了完成事件），一次性补发
         if not sent_delta and completed_answer:
@@ -652,6 +672,9 @@ class Handler(BaseHTTPRequestHandler):
             sent_delta = True
         if conversation_id and not sent_meta:
             self._sse_send("meta", json.dumps({"conversation_id": conversation_id}, ensure_ascii=False))
+        if branch:
+            # 真实分类标签：前端忽略，评测脚本据此统计路由，不再靠关键词反推
+            self._sse_send("branch", json.dumps({"branch": branch}, ensure_ascii=False))
 
         # 上游流异常结束：既没有增量也没有完成事件。直接发 done 会让前端留下空白气泡，
         # 这里改为下发 error，让用户看到明确提示而不是一段沉默。
@@ -660,6 +683,25 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self._sse_send("done", "[DONE]")
+
+    @staticmethod
+    def _split_structured(raw: str) -> tuple[str, str]:
+        """把结束节点返回的 {"reply": "...", "branch": "..."} 拆成回复与分类标签。
+
+        解析不出 reply 时返回 ("", "")，由调用方给出提示——
+        绝不能把 JSON 原文当答案显示给用户。
+        """
+        try:
+            obj = json.loads(raw)
+        except (ValueError, json.JSONDecodeError):
+            return "", ""
+        if not isinstance(obj, dict):
+            return "", ""
+        reply = obj.get("reply")
+        if not isinstance(reply, str) or not reply.strip():
+            return "", ""
+        branch = obj.get("branch")
+        return reply.strip(), branch.strip() if isinstance(branch, str) else ""
 
     @staticmethod
     def _error_message(detail: str, fallback: str) -> str:

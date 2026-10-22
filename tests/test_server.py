@@ -46,6 +46,7 @@ class FakeSse:
     """收集 _pump_stream 下发的事件，方便断言。"""
 
     _error_message = staticmethod(server.Handler._error_message)
+    _split_structured = staticmethod(server.Handler._split_structured)
 
     def __init__(self):
         self.events = []
@@ -370,6 +371,56 @@ class PumpStreamTest(unittest.TestCase):
         kinds = [e for e, _ in fake.events]
         self.assertEqual(kinds, ["error"])
         self.assertIn("超时", json.loads(fake.events[0][1])["message"])
+
+
+class StructuredOutputTest(unittest.TestCase):
+    """结束节点返回 {"reply","branch"} 时的拆分与透传。"""
+
+    def test_split_reply_and_branch(self):
+        reply, branch = server.Handler._split_structured(
+            '{"reply": "亲，这款是纯棉的", "branch": "商品咨询"}')
+        self.assertEqual(reply, "亲，这款是纯棉的")
+        self.assertEqual(branch, "商品咨询")
+
+    def test_missing_reply_is_rejected(self):
+        # 没有 reply 就不能当答案用，否则会把 JSON 原样显示给用户
+        self.assertEqual(server.Handler._split_structured('{"branch": "商品咨询"}'), ("", ""))
+        self.assertEqual(server.Handler._split_structured('{"reply": "   "}'), ("", ""))
+
+    def test_invalid_json_is_rejected(self):
+        self.assertEqual(server.Handler._split_structured("普通文本回复"), ("", ""))
+        self.assertEqual(server.Handler._split_structured("[1, 2]"), ("", ""))
+
+    def test_structured_stream_is_buffered_then_emitted(self):
+        """JSON 片段不能边收边吐，必须攒齐后只下发 reply。"""
+        fake = FakeSse()
+        part1 = json.dumps({"conversation_id": "c1", "role": "assistant", "type": "answer",
+                            "content": '{"reply": "你好'}, ensure_ascii=False)
+        part2 = json.dumps({"conversation_id": "c1", "role": "assistant", "type": "answer",
+                            "content": '，请稍等", "branch": "商品咨询"}'}, ensure_ascii=False)
+        resp = _sse_lines(
+            ("conversation.message.delta", part1),
+            ("conversation.message.delta", part2),
+            ("done", "[DONE]"),
+        )
+        server.Handler._pump_stream(fake, resp, "token")
+        kinds = [e for e, _ in fake.events]
+        self.assertEqual(kinds, ["meta", "delta", "branch", "done"])
+        self.assertEqual(json.loads(fake.events[1][1])["content"], "你好，请稍等")
+        self.assertEqual(json.loads(fake.events[2][1])["branch"], "商品咨询")
+
+    def test_structured_stream_without_reply_reports_error(self):
+        fake = FakeSse()
+        payload = json.dumps({"conversation_id": "c1", "role": "assistant", "type": "answer",
+                              "content": '{"branch": "商品咨询"}'}, ensure_ascii=False)
+        resp = _sse_lines(
+            ("conversation.message.delta", payload),
+            ("done", "[DONE]"),
+        )
+        server.Handler._pump_stream(fake, resp, "token")
+        kinds = [e for e, _ in fake.events]
+        self.assertIn("error", kinds)
+        self.assertNotIn("delta", kinds)
 
 
 # ----------------------------------------------------------------------

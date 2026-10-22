@@ -197,10 +197,10 @@ GitHub Pages 只能托管静态文件，跑不了后端，所以**真实对话�
 打开 `https://你的域名/api/health`，应返回：
 
 ```json
-{"ok": true, "bot_id": "7694865098007035940", "api_base": "https://api.coze.cn", "token_ready": true}
+{"ok": true, "bot_id": "7694865098007035940", "api_base": "https://api.coze.cn", "token_ready": true, "version": "YoumianProxy/1.9"}
 ```
 
-`token_ready` 为 `false` 说明环境变量没配上；`ok` 都拿不到说明服务没起来。
+`token_ready` 为 `false` 说明环境变量没配上；`version` 可以用来确认这次部署的代码是否真的上线；`ok` 都拿不到说明服务没起来。
 
 ### 每次发布前照清单走
 

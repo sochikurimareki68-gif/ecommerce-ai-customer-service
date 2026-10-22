@@ -408,6 +408,7 @@ class Handler(BaseHTTPRequestHandler):
                 "api_base": COZE_API_BASE,
                 "token_ready": bool(COZE_API_TOKEN),
                 "max_message_chars": MAX_MESSAGE_CHARS,
+                "version": self.server_version,
             })
             return
         self._serve_static(path)

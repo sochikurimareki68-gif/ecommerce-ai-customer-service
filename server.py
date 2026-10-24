@@ -31,6 +31,7 @@ import http.client
 import json
 import mimetypes
 import os
+import re
 import secrets
 import ssl
 import threading
@@ -225,6 +226,7 @@ class SessionStore:
                     "user_id": f"web_{token[:12]}",   # 由服务端生成，客户端无法指定
                     "conversation_id": "",
                     "epoch": 0,                       # 会话世代：reset 后 +1，用于丢弃在途请求的晚到结果
+                    "slots": {},                      # M-2 槽位：跨轮记住订单尾号/床型等关键信息
                     "seen": time.time(),
                 }
             session = self._data[token]
@@ -239,6 +241,7 @@ class SessionStore:
                 return 0
             session["epoch"] = session.get("epoch", 0) + 1
             session["conversation_id"] = ""
+            session["slots"] = {}                     # 清空会话时槽位一并清掉（M-2）
             session["seen"] = time.time()
             return session["epoch"]
 
@@ -258,8 +261,58 @@ class SessionStore:
                 return
             session["conversation_id"] = conversation_id
 
+    def merge_slots(self, token: str, found: dict) -> dict:
+        """把本轮抽到的槽位合并进会话，返回当前完整槽位（M-2）。"""
+        with self._lock:
+            session = self._data.get(token)
+            if not session:
+                return {}
+            slots = session.setdefault("slots", {})
+            slots.update(found)
+            return dict(slots)
+
 
 SESSIONS = SessionStore()
+
+# ----------------------------------------------------------------------
+# M-2 关键信息槽位化
+#
+# 扣子没有「会话级变量」可用（应用变量每请求重置、用户变量跨会话串扰），
+# 所以槽位记在服务端的会话里：每收到一条用户消息就按规则抽一次，合并进
+# 该会话的 slots，再以一条 [SLOTS_JSON] 助手快照的形式随请求发给扣子
+# （auto_save_history 会把它存进会话历史，回复节点从 chatHistory 里读到）。
+# 抽取只用确定性规则，宁缺毋滥 —— 抽不到就保持空，由提示词约束「空则追问」。
+# ----------------------------------------------------------------------
+SLOT_FABRIC_WORDS = ("有机棉", "长绒棉", "全棉", "纯棉", "天丝", "真丝", "磨毛", "亚麻")
+SLOT_SKU_WORDS = ("四件套", "被芯", "枕芯", "枕头", "床垫", "床笠", "被套", "床单", "毛毯")
+
+RE_ORDER_TAIL = re.compile(r"(?:尾号|订单号|单号)\s*[:：]?\s*(\d{4})")
+RE_PHONE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
+RE_BED_SIZE = re.compile(r"(1\.2|1\.5|1\.8|2\.0)\s*(?:米|m(?![a-zA-Z])|M(?![a-zA-Z]))")
+
+
+def extract_slots(message: str) -> dict:
+    """从一条用户消息里抽取关键槽位，抽到什么返回什么。"""
+    found: dict[str, str] = {}
+    m = RE_ORDER_TAIL.search(message)
+    if m:
+        found["order_no"] = f"尾号{m.group(1)}"
+    else:
+        m = RE_PHONE.search(message)
+        if m:
+            found["order_no"] = f"手机{m.group(0)}"
+    m = RE_BED_SIZE.search(message)
+    if m:
+        found["bed_size"] = f"{m.group(1)}米"
+    for word in SLOT_FABRIC_WORDS:
+        if word in message:
+            found["fabric"] = word
+            break
+    for word in SLOT_SKU_WORDS:
+        if word in message:
+            found["sku"] = word
+            break
+    return found
 
 # 扣子常见错误码 → 人话
 ERROR_HINTS = {
@@ -305,7 +358,7 @@ SSL_CONTEXT = build_ssl_context()
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "YoumianProxy/1.9"   # 与项目当前版本对齐，方便线上排查
+    server_version = "YoumianProxy/1.10"   # 与项目当前版本对齐，方便线上排查
 
     # 本请求需要下发的 Set-Cookie（新建会话时才会设置）
     _pending_cookie = ""
@@ -517,13 +570,22 @@ class Handler(BaseHTTPRequestHandler):
         epoch = SESSIONS.epoch(token)          # 记录本轮所处的会话世代
         self._pending_cookie = self._session_cookie(token)
 
+        # M-2：先从本条消息抽槽位、合并进会话，再把完整槽位以一条助手快照
+        # 随请求发出（auto_save_history 会存进会话历史，供回复节点读取）。
+        # 扣子要求 additional_messages 最后一条必须是 user，所以快照放前面。
+        slots = SESSIONS.merge_slots(token, extract_slots(message))
+        slots_snapshot = "[SLOTS_JSON]" + json.dumps(slots, ensure_ascii=False, separators=(",", ":"))
+
         body = {
             "bot_id": COZE_BOT_ID,
             "user_id": user_id,
             "stream": True,              # 流式返回，前端可以逐字显示
             "auto_save_history": True,   # 保存会话，多轮才记得住上下文
+            # 工作流开始节点的 SLOTS_JSON 输入（选填）：留空占位，保持兼容
+            "parameters": {"SLOTS_JSON": ""},
             "additional_messages": [
-                {"role": "user", "content": message, "content_type": "text"}
+                {"role": "assistant", "content": slots_snapshot, "content_type": "text"},
+                {"role": "user", "content": message, "content_type": "text"},
             ],
         }
 

@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import http.cookiejar
 import json
+import re
 import statistics
 import ssl
 import sys
@@ -42,6 +43,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DATASET = ROOT / "eval" / "dataset.json"
 REPORT = ROOT / "eval" / "report.md"
 MULTI_REPORT = ROOT / "eval" / "report-multi.md"
+FACT_REPORT = ROOT / "eval" / "report-facts.md"
+MEMORY_REPORT = ROOT / "eval" / "report-memory.md"
 
 # 单次请求最长等待（秒）。知识库类问题偶尔较慢。
 REQUEST_TIMEOUT = 120
@@ -340,6 +343,149 @@ def write_multi_report(meta: dict, s: dict, results: list[dict]) -> None:
     MULTI_REPORT.write_text("\n".join(lines), encoding="utf-8")
 
 
+# ----------------------------------------------------------------------
+# 记忆回归用例（M-4）：前 5 句埋信息 + 干扰，第 6 句追问第 1 句给过的事实
+#
+# 判定口径（参照规划表 M-4）：
+#   答对     —— 第 6 句命中 expect_any，且没有编造
+#   没记住   —— 明确说「不记得/没记录」也算达标，不逼模型硬猜
+#   编造     —— 出现 must_not 里的错误值，或出现与 expect_any 不符的数字
+#   跑题     —— 既没答对也没承认没记住
+# 后两种判失败。第 6 句已滑出 5 轮 chatHistory 窗口，能答对只能靠后端槽位快照。
+# ----------------------------------------------------------------------
+# 每句之间的间隔（秒）：6 句要落在「单 IP 每分钟 6 次」以内
+MEMORY_TURN_GAP = 12
+RECALL_MISS_WORDS = ("不记得", "没记住", "没有记录", "无法回忆", "记不清", "没有印象")
+
+
+def run_memory_case(case: dict, base_url: str, forbidden: list[str]) -> dict:
+    """同一会话连发多句，只看最后一句能否复述第一句给过的事实。"""
+    opener = build_session_opener()
+    replies: list[str] = []
+    elapsed_last = 0.0
+    ttft_last = 0.0
+    error = ""
+
+    for idx, question in enumerate(case["turns"]):
+        ok, reply, elapsed, err, ttft, _label = False, "", 0.0, "", 0.0, ""
+        for attempt in range(RETRY + 1):
+            ok, reply, elapsed, err, ttft, _label = ask(base_url, question, opener=opener)
+            if ok or attempt >= RETRY:
+                break
+            time.sleep(RATE_LIMIT_WAIT if is_rate_limited(err) else 3)
+        replies.append(reply)
+        elapsed_last, ttft_last = round(elapsed, 1), round(ttft, 1)
+        if not ok:
+            error = err or "调用失败"
+            break
+        if idx < len(case["turns"]) - 1:
+            time.sleep(MEMORY_TURN_GAP)
+
+    final = replies[-1] if replies else ""
+    expect = case["expect_any"]
+    hit = [w for w in expect if w in final]
+    must_not_hits = [w for w in case.get("must_not", []) if w in final]
+    wrong_digits: list[str] = []
+    width = case.get("digit_width")
+    if width and final:
+        wrong_digits = [d for d in re.findall(rf"(?<!\d)\d{{{width}}}(?!\d)", final) if d not in expect]
+    miss = [w for w in RECALL_MISS_WORDS if w in final]
+    leak = "SLOTS_JSON" in final or final.lstrip().startswith("{")
+    forbidden_hits = [w for w in forbidden if w in final]
+
+    if error:
+        verdict = "请求失败"
+    elif must_not_hits or wrong_digits:
+        verdict = "编造"
+    elif hit:
+        verdict = "答对"
+    elif miss:
+        verdict = "明确说没记住"
+    else:
+        verdict = "跑题"
+
+    return {
+        "id": case["id"],
+        "dim": case.get("dim", ""),
+        "turns": case["turns"],
+        "ok": not error,
+        "error": error,
+        "reply1": replies[0] if replies else "",
+        "final": final,
+        "verdict": verdict,
+        "hit": hit,
+        "must_not_hits": must_not_hits,
+        "wrong_digits": wrong_digits,
+        "miss": bool(miss),
+        "leak": leak,
+        "forbidden_hits": forbidden_hits,
+        "elapsed_last": elapsed_last,
+        "ttft_last": ttft_last,
+        "passed": (verdict in ("答对", "明确说没记住")) and not leak and not forbidden_hits,
+    }
+
+
+def write_memory_report(meta: dict, results: list[dict]) -> None:
+    total = len(results)
+    passed = sum(1 for r in results if r["passed"])
+    lines = []
+    a = lines.append
+
+    a("# 项目一 · 记忆回归评测报告（M-4）")
+    a("")
+    a(f"- 时间：{meta['time']}")
+    a(f"- 接口：`{meta['base']}`")
+    turns_n = len(results[0]["turns"]) if results else 0
+    a(f"- 用例：{total} 组，每组 {turns_n} 句（第 1 句埋信息、中间干扰、末句追问）")
+    a(f"- 结果：**{passed}/{total} 通过**" if total else "- 结果：—")
+    a("")
+    a("## 判定口径")
+    a("")
+    a("- **答对**：末句命中预期值（如尾号 3829、床型 1.8 米），且无编造 —— 达标")
+    a("- **明确说没记住**：回复明确表示没有记录/记不清 —— 达标，不逼模型硬猜")
+    a("- **编造**：出现错误值（如别的尾号、别的床型）—— 失败")
+    a("- **跑题**：既没答对也没承认没记住 —— 失败")
+    a("- **泄漏**：回复出现 `SLOTS_JSON` 或裸 JSON —— 失败")
+    a("")
+    a("## 逐条结果")
+    a("")
+    a("| ID | 槽位 | 末句提问 | 判定 | 命中 | 编造/错误值 | 抱怨/泄漏 | 末句首字 | 末句回复摘要 |")
+    a("|----|------|---------|------|------|------------|----------|---------|--------------|")
+    for r in results:
+        flag = "✅" if r["passed"] else "❌"
+        bad = "、".join(r["must_not_hits"] + r["wrong_digits"]) or "—"
+        issues = []
+        if r["leak"]:
+            issues.append("JSON 泄漏")
+        if r["forbidden_hits"]:
+            issues.append("禁词：" + "/".join(r["forbidden_hits"]))
+        if not r["ok"]:
+            bad = r["error"]
+        a(f"| {r['id']} | {md_cell(r['dim'])} | {md_cell(r['turns'][-1])} | {flag} {r['verdict']} "
+          f"| {'、'.join(r['hit']) or '—'} | {md_cell(bad)} | {md_cell('；'.join(issues) or '—')} "
+          f"| {r['ttft_last']}s | {md_cell((r['final'] or '')[:60])} |")
+    a("")
+    a("## 失败用例完整回复")
+    a("")
+    bad_cases = [r for r in results if not r["passed"]]
+    if not bad_cases:
+        a("（无失败用例）")
+    for r in bad_cases:
+        a(f"### {r['id']} {r['turns'][-1]}")
+        a("")
+        a(f"> {md_cell(r['final'][:400])}")
+        a("")
+    a("## 复现方式")
+    a("")
+    a("```bash")
+    a("python3 server.py                                  # 另开终端启动代理")
+    a("python3 eval/run_eval.py --memory                  # 跑 2 组记忆回归")
+    a("python3 eval/run_eval.py --memory --base https://youmian-customer-service.onrender.com")
+    a("```")
+    a("")
+    MEMORY_REPORT.write_text("\n".join(lines), encoding="utf-8")
+
+
 def summarize(results: list[dict]) -> dict:
     total = len(results)
     succeeded = [r for r in results if r["ok"]]
@@ -514,16 +660,178 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     REPORT.write_text("\n".join(lines), encoding="utf-8")
 
 
+# ----------------------------------------------------------------------
+# 事实一致性用例：expect_all 必须全中，must_not 命中即判编造
+# ----------------------------------------------------------------------
+def run_fact_case(case: dict, base_url: str) -> dict:
+    """跑单条事实用例：精确断言知识库事实，编造内容（must_not）出现即失败。"""
+    ttft = 0.0
+    ok, reply, elapsed, err = False, "", 0.0, ""
+    for attempt in range(RETRY + 1):
+        ok, reply, elapsed, err, ttft, _label = ask(base_url, case["input"])
+        if ok:
+            break
+        if attempt < RETRY:
+            time.sleep(RATE_LIMIT_WAIT if is_rate_limited(err) else 3)
+
+    expect_all = case.get("expect_all", [])
+    expect_any = case.get("expect_any", [])
+    missing = [w for w in expect_all if w not in reply]
+    must_not_hits = [w for w in case.get("must_not", []) if w in reply]
+    any_hit = (not expect_any) or any(w in reply for w in expect_any)
+    return {
+        "id": case["id"],
+        "input": case["input"],
+        "ok": ok,
+        "error": err,
+        "elapsed": round(elapsed, 1),
+        "ttft": round(ttft, 1),
+        "reply": reply,
+        "expect_all": expect_all,
+        "expect_any": expect_any,
+        "missing": missing,
+        "any_hit": any_hit,
+        "must_not_hits": must_not_hits,
+        "passed": bool(ok and not missing and not must_not_hits and any_hit),
+    }
+
+
+def write_fact_report(meta: dict, results: list[dict]) -> None:
+    total = len(results)
+    passed = sum(1 for r in results if r["passed"])
+    lats = [r["elapsed"] for r in results if r["ok"]]
+    lines = []
+    a = lines.append
+    a("# 项目一 · 事实一致性评测报告")
+    a("")
+    a(f"- 时间：{meta['time']}")
+    a(f"- 接口：{meta['base']}")
+    a(f"- 用例：{total} 条（expect_all 必须全中、must_not 命中即失败）")
+    a(f"- 结果：**{passed}/{total} 通过**（{passed / total * 100:.0f}%）" if total else "- 结果：—")
+    if lats:
+        a(f"- 平均延迟：{statistics.mean(lats):.1f}s")
+    a("")
+    a("## 判定口径")
+    a("")
+    a("- `expect_all`：知识库中的原文事实（如 OEKO-TEX、绍兴、48），回复必须全部包含，缺一个即失败")
+    a("- `must_not`：编造内容黑名单（如 A类婴幼儿认证、24小时发货、下单当天起算），出现任何一个即失败")
+    a("- `expect_any`：软性命中（可选），至少出现一个")
+    a("")
+    a("## 逐条结果")
+    a("")
+    a("| # | 输入 | 结果 | 缺失事实 | 编造命中 | 耗时 |")
+    a("|---|------|------|----------|----------|------|")
+    for r in results:
+        flag = "✅" if r["passed"] else "❌"
+        missing = "、".join(r["missing"]) if r["missing"] else "—"
+        fabricated = "、".join(r["must_not_hits"]) if r["must_not_hits"] else "—"
+        if not r["ok"]:
+            missing = f"请求失败：{md_cell(r['error'])}"
+        elif not r["any_hit"]:
+            missing = (missing if missing != "—" else "") + "（软性词未命中）"
+        a(f"| {r['id']} | {md_cell(r['input'])} | {flag} | {md_cell(missing)} | {md_cell(fabricated)} | {r['elapsed']}s |")
+    a("")
+    a("## 失败用例完整回复")
+    a("")
+    bad = [r for r in results if not r["passed"]]
+    if not bad:
+        a("（无失败用例）")
+    for r in bad:
+        a(f"### {r['id']} {r['input']}")
+        a("")
+        a(f"> {md_cell(r['reply'][:400])}")
+        a("")
+    a("## 复现方式")
+    a("")
+    a("```bash")
+    a("python3 eval/run_eval.py --facts --base https://youmian-customer-service.onrender.com")
+    a("```")
+    a("")
+    FACT_REPORT.write_text("\n".join(lines), encoding="utf-8")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="项目一 v1.7 效果评测")
     parser.add_argument("--base", default="http://localhost:3000", help="代理服务地址")
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 条用例")
     parser.add_argument("--workers", type=int, default=1, help="并发数，默认 1（避免触发单 IP 每分钟限流）")
     parser.add_argument("--multi", action="store_true", help="跑多轮用例：同一会话连发两句，结果写入 eval/report-multi.md")
+    parser.add_argument("--facts", action="store_true", help="跑事实一致性用例：expect_all 必须全中、must_not 命中即失败，结果写入 eval/report-facts.md")
+    parser.add_argument("--memory", action="store_true", help="跑记忆回归用例：多轮埋信息后追问，答对或明确说没记住才通过，结果写入 eval/report-memory.md")
     args = parser.parse_args()
 
     data = json.loads(DATASET.read_text(encoding="utf-8"))
     forbidden = data["forbidden"]
+
+    if args.facts:
+        fcases = data.get("fact_cases", [])
+        if args.limit:
+            fcases = fcases[: args.limit]
+        if not fcases:
+            print("dataset.json 里没有 fact_cases，无法跑事实一致性评测")
+            return 1
+
+        print(f"▶ 事实一致性评测开始：{len(fcases)} 条用例 | 接口 {args.base}")
+        print("─" * 62)
+        fact_results: list[dict] = []
+        for idx, case in enumerate(fcases, 1):
+            r = run_fact_case(case, args.base)
+            fact_results.append(r)
+            flag = "✅" if r["passed"] else "❌"
+            detail = ""
+            if r["missing"]:
+                detail = "缺：" + "/".join(r["missing"])
+            if r["must_not_hits"]:
+                detail += " 编造：" + "/".join(r["must_not_hits"])
+            if not r["ok"]:
+                detail = r["error"]
+            print(f"  [{idx:>2}/{len(fcases)}] {flag} {r['id']:<5} {r['input'][:14]:<14} "
+                  f"{r['elapsed']:>5.1f}s{detail}")
+            if idx < len(fcases):
+                time.sleep(2)
+
+        passed_n = sum(1 for r in fact_results if r["passed"])
+        write_fact_report(
+            {"time": datetime.now().strftime("%Y-%m-%d %H:%M"), "base": args.base},
+            fact_results,
+        )
+        print("─" * 62)
+        print(f"事实一致性     : {passed_n}/{len(fact_results)} 通过")
+        print(f"报告已写入     : {FACT_REPORT}")
+        return 0
+
+    if args.memory:
+        mcases = data.get("memory_cases", [])
+        if args.limit:
+            mcases = mcases[: args.limit]
+        if not mcases:
+            print("dataset.json 里没有 memory_cases，无法跑记忆回归评测")
+            return 1
+
+        total_turns = sum(len(c["turns"]) for c in mcases)
+        print(f"▶ 记忆回归评测开始：{len(mcases)} 组 × {len(mcases[0]['turns'])} 句（共 {total_turns} 次请求）| 接口 {args.base}")
+        print("─" * 62)
+        memory_results: list[dict] = []
+        for idx, case in enumerate(mcases, 1):
+            r = run_memory_case(case, args.base, forbidden)
+            memory_results.append(r)
+            flag = "✅" if r["passed"] else "❌"
+            print(f"  [{idx}/{len(mcases)}] {flag} {r['id']} {r['dim']:<16} {r['verdict']:<8}"
+                  f" 末句首字 {r['ttft_last']:>4.1f}s")
+            print(f"        Q: {case['turns'][-1]}")
+            print(f"        A: {(r['final'] or r['error'])[:80]}")
+            if idx < len(mcases):
+                time.sleep(MEMORY_TURN_GAP)
+
+        passed_n = sum(1 for r in memory_results if r["passed"])
+        write_memory_report(
+            {"time": datetime.now().strftime("%Y-%m-%d %H:%M"), "base": args.base},
+            memory_results,
+        )
+        print("─" * 62)
+        print(f"记忆回归       : {passed_n}/{len(memory_results)} 通过")
+        print(f"报告已写入     : {MEMORY_REPORT}")
+        return 0
 
     if args.multi:
         groups = data.get("multi_turn_cases", [])

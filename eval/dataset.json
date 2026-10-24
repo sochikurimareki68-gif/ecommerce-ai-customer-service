@@ -18,6 +18,53 @@
     { "id": "M04", "turns": ["多久能发货？", "新疆发吗？"], "expect_any": ["新疆", "EMS", "偏远"] },
     { "id": "M05", "turns": ["现在有什么活动？", "能叠加吗？"], "expect_any": ["叠加"] }
   ],
+  "_memory_comment": "记忆回归用例（M-4）：同一会话连发 6 句，第 1 句埋关键信息、中间 4 句干扰、第 6 句追问。判定：命中 expect_any 且无编造=答对；明确说没记住=达标；出现 must_not 或错误数字=编造，既没答对也没说没记住=跑题，后两种判失败。digit_width 用于自动揪出编造的数字。由 run_eval.py --memory 执行，结果写入 eval/report-memory.md。",
+  "memory_cases": [
+    {
+      "id": "MEM01",
+      "dim": "order_no 订单尾号",
+      "turns": [
+        "我买的1.8米有机棉四件套，订单尾号3829，什么时候发货？",
+        "物流一般几天能到？",
+        "支持七天无理由退换吗？",
+        "最近有什么满减活动？",
+        "被套掉色怎么处理？",
+        "帮我回忆一下，我前面说的订单尾号是多少？"
+      ],
+      "expect_any": ["3829"],
+      "digit_width": 4,
+      "must_not": []
+    },
+    {
+      "id": "MEM02",
+      "dim": "bed_size 床型",
+      "turns": [
+        "我要买的床是1.8米的，有机棉四件套有合适的吗？",
+        "被套掉色怎么处理？",
+        "多久能发货？",
+        "支持七天无理由退换吗？",
+        "最近有什么满减活动？",
+        "那我前面说的床是几米的？"
+      ],
+      "expect_any": ["1.8"],
+      "must_not": ["1.5米", "1.5 米", "1.2米", "2.0米", "1.5m"]
+    }
+  ],
+  "_fact_comment": "事实一致性用例（v1.9）：expect_all 必须全部命中，must_not 命中任何一个即判编造/答错，expect_any 为软性命中（可选）。断言全部来自 docs/faq-knowledge-base.md 与 docs/product-catalog.md 的原文事实，由 run_eval.py --facts 执行，结果写入 eval/report-facts.md。",
+  "fact_cases": [
+    { "id": "FC01", "input": "你们家产品有哪些认证？", "expect_all": ["OEKO-TEX"], "expect_any": ["ISO 9001", "ISO9001"], "must_not": ["A类", "A 类", "婴幼儿", "FDA", "CE认证"] },
+    { "id": "FC02", "input": "你们的产品产地是哪里？", "expect_all": ["绍兴"], "must_not": ["杭州", "上海", "广州", "苏州"] },
+    { "id": "FC03", "input": "下单后多久发货？", "expect_all": ["48"], "must_not": ["24小时", "当天发", "秒发", "次日达"] },
+    { "id": "FC04", "input": "满多少钱包邮？", "expect_all": ["199"], "expect_any": ["包邮"], "must_not": ["满99", "满150", "满299"] },
+    { "id": "FC05", "input": "新疆发货要补运费吗？", "expect_all": ["新疆"], "expect_any": ["20", "30", "补", "差价"], "must_not": ["新疆包邮", "西藏包邮"] },
+    { "id": "FC06", "input": "退货的运费谁承担？", "expect_all": ["买家"], "expect_any": ["质量问题", "卖家"], "must_not": ["运费全免", "永久免费"] },
+    { "id": "FC07", "input": "7天无理由从什么时候开始算？", "expect_all": ["签收"], "must_not": ["下单当天", "付款当天", "发货当天", "下单之日起"] },
+    { "id": "FC08", "input": "枕芯可以7天无理由退货吗？", "expect_all": ["枕芯"], "expect_any": ["不支持", "非质量", "贴身"], "must_not": ["枕芯支持7天无理由", "可以直接退"] },
+    { "id": "FC09", "input": "满减能和优惠券叠加吗？", "expect_all": ["叠加"], "expect_any": ["满减", "优惠券"], "must_not": ["不能叠加", "不可叠加", "不支持叠加"] },
+    { "id": "FC10", "input": "1.8米的四件套多少钱？", "expect_all": ["1.8"], "expect_any": ["299", "349", "459", "599", "899", "价格", "参考"], "must_not": ["免费", "0元", "1999"] },
+    { "id": "FC11", "input": "超过承诺时间没发货有补偿吗？", "expect_all": ["5"], "expect_any": ["48", "补偿", "券"], "must_not": ["10元", "20元", "50元"] },
+    { "id": "FC12", "input": "床品面料有荧光剂吗？", "expect_all": ["不含"], "expect_any": ["OEKO", "荧光剂"], "must_not": ["含少量", "微量荧光", "有少量"] }
+  ],
   "cases": [
     { "id": "P01", "expect_branch": "商品咨询", "input": "四件套有哪些尺寸？", "expect_any": ["尺寸", "cm"] },
     { "id": "P02", "expect_branch": "商品咨询", "input": "你们的被芯是什么材质的？", "expect_any": ["材质", "填充", "面料", "棉"] },

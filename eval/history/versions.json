@@ -1,0 +1,12 @@
+{
+  "v1.10": {
+    "time": "2026-10-25 00:07",
+    "base": "http://localhost:3000",
+    "total": 6,
+    "route_pct": "100.0%",
+    "keyword_pct": "100.0%",
+    "forbidden_pct": "100.0%",
+    "latency_avg": 13.6,
+    "ttft_avg": 13.6
+  }
+}

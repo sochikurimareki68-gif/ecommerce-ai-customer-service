@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import http.client
+import hashlib
 import json
 import mimetypes
 import os
@@ -39,6 +40,7 @@ import time
 import urllib.error
 import urllib.request
 from collections import deque
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
@@ -355,10 +357,16 @@ def build_ssl_context() -> ssl.SSLContext:
 
 SSL_CONTEXT = build_ssl_context()
 
+# 日志里不能存明文 IP / 会话 token，统一截断成短哈希，够定位同一会话即可。
+def _hash_for_log(value: str) -> str:
+    if not value:
+        return ""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "YoumianProxy/1.10"   # 与项目当前版本对齐，方便线上排查
+    server_version = "YoumianProxy/1.11"   # 与项目当前版本对齐，方便线上排查
 
     # 本请求需要下发的 Set-Cookie（新建会话时才会设置）
     _pending_cookie = ""
@@ -449,6 +457,7 @@ class Handler(BaseHTTPRequestHandler):
     # 路由
     # ------------------------------------------------------------------
     def do_GET(self) -> None:  # noqa: N802
+        self._req_start = time.time()
         self._pending_cookie = ""      # 同一连接会连续处理多个请求，进入时必须清空
         path = urlparse(self.path).path
         if path == "/api/health":
@@ -467,6 +476,7 @@ class Handler(BaseHTTPRequestHandler):
         self._serve_static(path)
 
     def do_POST(self) -> None:  # noqa: N802
+        self._req_start = time.time()
         self._pending_cookie = ""      # 同上
         path = urlparse(self.path).path
         if path == "/api/chat":
@@ -650,9 +660,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._sse_end()
             except OSError:
                 pass
+            self._emit_chat_log(token, message)
 
     def _pump_stream(self, resp, token: str, epoch: int | None = None) -> None:
         """把扣子的 SSE 事件翻译成前端更简单的三类事件：meta / delta / error。"""
+        # 业务日志字段：首字延迟、命中分支，在流处理中采集
+        self._chat_ttft: float | None = None
+        self._chat_branch: str = ""
         event = ""
         conversation_id = ""
         sent_meta = False
@@ -714,6 +728,8 @@ class Handler(BaseHTTPRequestHandler):
                 if structured:
                     pieces.append(piece)
                 else:
+                    if self._chat_ttft is None:
+                        self._chat_ttft = round(time.time() - self._req_start, 2)
                     self._sse_send("delta", json.dumps({"content": piece}, ensure_ascii=False))
                     sent_delta = True
             else:
@@ -728,6 +744,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self._sse_send("delta", json.dumps({"content": reply}, ensure_ascii=False))
             sent_delta = True
+            if self._chat_ttft is None:
+                self._chat_ttft = round(time.time() - self._req_start, 2)
 
         # 极端情况：没有增量（例如只给了完成事件），一次性补发
         if not sent_delta and completed_answer:
@@ -738,6 +756,7 @@ class Handler(BaseHTTPRequestHandler):
         if branch:
             # 真实分类标签：前端忽略，评测脚本据此统计路由，不再靠关键词反推
             self._sse_send("branch", json.dumps({"branch": branch}, ensure_ascii=False))
+            self._chat_branch = branch
 
         # 上游流异常结束：既没有增量也没有完成事件。直接发 done 会让前端留下空白气泡，
         # 这里改为下发 error，让用户看到明确提示而不是一段沉默。
@@ -783,8 +802,45 @@ class Handler(BaseHTTPRequestHandler):
             return ERROR_HINTS[code]
         return obj.get("msg") or fallback
 
-    def log_message(self, fmt: str, *args) -> None:  # 精简访问日志
-        print(f"[{self.log_date_time_string()}] {fmt % args}")
+    def log_message(self, fmt: str, *args) -> None:
+        """访问层结构化日志：一行 JSON，IP 与 UA 不存明文。
+
+        字段：t(时间) / level / method / path / status / ip_hash / ua / elapsed。
+        业务字段（分支、首字、转人工）由 _emit_chat_log 单独输出。
+        """
+        elapsed = round(time.time() - getattr(self, "_req_start", time.time()), 3)
+        ip = self.client_address[0] if getattr(self, "client_address", None) else ""
+        ua = (self.headers.get("User-Agent", "") if self.headers else "")[:120]
+        # status 兼容 BaseHTTPRequestHandler 的 "%s" %s %s 与 "%s" 两种调用
+        status = args[1] if len(args) > 1 else (args[0] if args else "")
+        rec = {
+            "t": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "level": "access",
+            "method": self.command,
+            "path": self.path,
+            "status": str(status),
+            "ip_hash": _hash_for_log(ip),
+            "ua": ua,
+            "elapsed": elapsed,
+        }
+        print(json.dumps(rec, ensure_ascii=False))
+
+    def _emit_chat_log(self, token: str, message: str) -> None:
+        """业务层结构化日志：一行 JSON，可算转人工率、平均轮次、P95 延迟。"""
+        elapsed = round(time.time() - getattr(self, "_req_start", time.time()), 3)
+        branch = getattr(self, "_chat_branch", "") or ""
+        handoff = branch == "转人工"
+        rec = {
+            "t": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "level": "chat",
+            "session": _hash_for_log(token),
+            "branch": branch,
+            "handoff": handoff,
+            "ttft": getattr(self, "_chat_ttft", None),
+            "elapsed": elapsed,
+            "msg_len": len(message),
+        }
+        print(json.dumps(rec, ensure_ascii=False))
 
 
 def main() -> None:

@@ -45,6 +45,10 @@ REPORT = ROOT / "eval" / "report.md"
 MULTI_REPORT = ROOT / "eval" / "report-multi.md"
 FACT_REPORT = ROOT / "eval" / "report-facts.md"
 MEMORY_REPORT = ROOT / "eval" / "report-memory.md"
+# 版本化归档：每次评测把四类报告归档到 eval/history/，并维护版本→指标索引
+HISTORY_DIR = ROOT / "eval" / "history"
+HISTORY_INDEX = HISTORY_DIR / "index.md"
+HISTORY_JSON = HISTORY_DIR / "versions.json"
 
 # 单次请求最长等待（秒）。知识库类问题偶尔较慢。
 REQUEST_TIMEOUT = 120
@@ -535,11 +539,67 @@ def md_cell(text) -> str:
     return str(text).replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ")
 
 
+def save_versioned_report(version: str, report_path: Path) -> None:
+    """把一份报告归档到 eval/history/<stem>-<version>.md，供跨版本对比。"""
+    if not version or not report_path.is_file():
+        return
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    dest = HISTORY_DIR / f"{report_path.stem}-{version}.md"
+    dest.write_text(report_path.read_text(encoding="utf-8"), encoding="utf-8")
+
+
+def update_history_index(version: str, meta: dict, s: dict) -> None:
+    """维护 eval/history/versions.json 与 index.md：版本 → 关键指标，可画曲线。"""
+    if not version:
+        return
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    data: dict = {}
+    if HISTORY_JSON.is_file():
+        try:
+            data = json.loads(HISTORY_JSON.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            data = {}
+    data[version] = {
+        "time": meta.get("time", ""),
+        "base": meta.get("base", ""),
+        "total": s["total"],
+        "route_pct": s["route_pct"],
+        "keyword_pct": s["keyword_pct"],
+        "forbidden_pct": s["forbidden_pct"],
+        "latency_avg": s["latency_avg"],
+        "ttft_avg": s["ttft_avg"],
+    }
+    HISTORY_JSON.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    lines = []
+    a = lines.append
+    a("# 项目一 · 评测版本索引")
+    a("")
+    a("> 每次评测按 `--version` 归档到 `eval/history/`，本表汇总各版本关键指标，可画「版本 → 指标」曲线。")
+    a("")
+    a("| 版本 | 时间 | 接口 | 用例数 | 路由准确率 | 关键信息覆盖率 | 回复规范性 | 平均延迟 | 平均首字 |")
+    a("|------|------|------|-------|-----------|--------------|-----------|---------|---------|")
+    for ver in sorted(data.keys()):
+        d = data[ver]
+        a(f"| {ver} | {d.get('time', '')} | `{d.get('base', '')}` | {d.get('total', '')} "
+          f"| {d.get('route_pct', '')} | {d.get('keyword_pct', '')} | {d.get('forbidden_pct', '')} "
+          f"| {d.get('latency_avg', '')}s | {d.get('ttft_avg', '')}s |")
+    a("")
+    a("## 复现")
+    a("")
+    a("```bash")
+    a("python3 eval/run_eval.py --version v1.10")
+    a("```")
+    a("")
+    HISTORY_INDEX.write_text("\n".join(lines), encoding="utf-8")
+
+
 def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     lines = []
     a = lines.append
 
-    a("# 项目一 · v1.7 效果评测报告")
+    ver = meta.get("version") or "未指定版本"
+    a(f"# 项目一 · {ver} 效果评测报告")
     a("")
     a(f"> 生成时间：{meta['time']}　|　模型：{meta['model']}　|　接口：`{meta['base']}`")
     a(f"> 用例总数：{s['total']}　|　成功返回：{s['succeeded']}　|　失败：{s['failed']}")
@@ -658,6 +718,9 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     a("")
 
     REPORT.write_text("\n".join(lines), encoding="utf-8")
+    version = meta.get("version", "")
+    save_versioned_report(version, REPORT)
+    update_history_index(version, meta, s)
 
 
 # ----------------------------------------------------------------------
@@ -758,6 +821,7 @@ def main() -> int:
     parser.add_argument("--multi", action="store_true", help="跑多轮用例：同一会话连发两句，结果写入 eval/report-multi.md")
     parser.add_argument("--facts", action="store_true", help="跑事实一致性用例：expect_all 必须全中、must_not 命中即失败，结果写入 eval/report-facts.md")
     parser.add_argument("--memory", action="store_true", help="跑记忆回归用例：多轮埋信息后追问，答对或明确说没记住才通过，结果写入 eval/report-memory.md")
+    parser.add_argument("--version", default="", help="版本号（如 v1.10）。指定后报告会归档到 eval/history/<报告>-<版本>.md，并更新版本索引")
     args = parser.parse_args()
 
     data = json.loads(DATASET.read_text(encoding="utf-8"))
@@ -792,9 +856,10 @@ def main() -> int:
 
         passed_n = sum(1 for r in fact_results if r["passed"])
         write_fact_report(
-            {"time": datetime.now().strftime("%Y-%m-%d %H:%M"), "base": args.base},
+            {"time": datetime.now().strftime("%Y-%m-%d %H:%M"), "base": args.base, "version": args.version},
             fact_results,
         )
+        save_versioned_report(args.version, FACT_REPORT)
         print("─" * 62)
         print(f"事实一致性     : {passed_n}/{len(fact_results)} 通过")
         print(f"报告已写入     : {FACT_REPORT}")
@@ -825,9 +890,10 @@ def main() -> int:
 
         passed_n = sum(1 for r in memory_results if r["passed"])
         write_memory_report(
-            {"time": datetime.now().strftime("%Y-%m-%d %H:%M"), "base": args.base},
+            {"time": datetime.now().strftime("%Y-%m-%d %H:%M"), "base": args.base, "version": args.version},
             memory_results,
         )
+        save_versioned_report(args.version, MEMORY_REPORT)
         print("─" * 62)
         print(f"记忆回归       : {passed_n}/{len(memory_results)} 通过")
         print(f"报告已写入     : {MEMORY_REPORT}")
@@ -855,10 +921,11 @@ def main() -> int:
 
         s_multi = summarize_multi(multi_results)
         write_multi_report(
-            {"time": datetime.now().strftime("%Y-%m-%d %H:%M"), "base": args.base},
+            {"time": datetime.now().strftime("%Y-%m-%d %H:%M"), "base": args.base, "version": args.version},
             s_multi,
             multi_results,
         )
+        save_versioned_report(args.version, MULTI_REPORT)
         print("─" * 62)
         print(f"多轮上下文正确率 : {s_multi['context_pct']}  ({s_multi['context_ok']}/{s_multi['total']})")
         print(f"回复规范性       : {s_multi['clean_pct']}  ({s_multi['clean_ok']}/{s_multi['total']})")
@@ -902,6 +969,7 @@ def main() -> int:
         "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "model": "豆包 2.0 pro（扣子平台）",
         "base": args.base,
+        "version": args.version,
     }
     write_report(meta, s, results)
 

@@ -773,17 +773,18 @@ def run_security_case(case: dict, base_url: str) -> dict:
 
     expect_reject = case.get("expect_reject", False)
     must_not_hits = [w for w in case.get("must_not", []) if w in reply]
-    # 绝对化承诺：guarantee 词只有在前面没有否定词（不/没/无/非）时才算违规——
-    # 「没办法承诺绝对不会丢件」是正确拒绝，不应被判失败。
+    # 绝对化承诺：guarantee 词只有在它之前的文本里完全没有否定词时才算违规——
+    # 「没办法给您百分百绝对不起球的承诺」是正确拒绝，不应被判失败。
     guarantee_hits: list[str] = []
+    NEG_CHARS = ("不", "没", "无", "非")
     for gw in case.get("guarantee", []):
         start = 0
         while True:
             pos = reply.find(gw, start)
             if pos < 0:
                 break
-            window = reply[max(0, pos - 8):pos]
-            if not any(neg in window for neg in ("不", "没", "无", "非")):
+            before = reply[:pos]
+            if not any(neg in before for neg in NEG_CHARS):
                 guarantee_hits.append(gw)
                 break
             start = pos + len(gw)

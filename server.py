@@ -87,6 +87,15 @@ IP_PER_MINUTE = int(os.environ.get("IP_PER_MINUTE", "6"))
 IP_PER_DAY = int(os.environ.get("IP_PER_DAY", "60"))
 GLOBAL_PER_DAY = int(os.environ.get("GLOBAL_PER_DAY", "500"))
 HEALTH_PER_MINUTE = int(os.environ.get("HEALTH_PER_MINUTE", "30"))
+# P2-4 成本指标：扣子 v3 流式不返回 token 用量，按字符数本地估算（中文 1 字≈1 token，英文≈4 字符 1 token）。
+# 价格单位：元 / 千 token，默认按豆包 Pro 输入 0.0008、输出 0.002，可在 .env 覆盖。
+COZE_IN_PRICE = float(os.environ.get("COZE_IN_PRICE", "0.0008"))
+COZE_OUT_PRICE = float(os.environ.get("COZE_OUT_PRICE", "0.002"))
+# 扣子系统提示词的固定 token 开销估算（助手快照注入后，模型实际输入还含 bot 自带 prompt）
+PROMPT_OVERHEAD_TOK = int(os.environ.get("PROMPT_OVERHEAD_TOK", "300"))
+# P2-4 FAQ 缓存：只缓存会话首问（epoch==0），相同问题直接回放，省一次模型调用。TTL 1 小时，最多 200 条。
+FAQ_CACHE_TTL = int(os.environ.get("FAQ_CACHE_TTL", "3600"))
+FAQ_CACHE_MAX = int(os.environ.get("FAQ_CACHE_MAX", "200"))
 # 会话 Cookie 是否强制加 Secure；留空则按请求的 X-Forwarded-Proto 自动判断（HTTPS 部署加，本地不加）
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "").strip().lower() in ("1", "true", "yes")
 EXTRA_ORIGINS = [
@@ -357,6 +366,41 @@ def build_ssl_context() -> ssl.SSLContext:
 
 SSL_CONTEXT = build_ssl_context()
 
+
+def estimate_tokens(text: str) -> int:
+    """字节系 tokenizer 近似：中文 1 字≈1 token，英文/数字≈4 字符 1 token。"""
+    if not text:
+        return 0
+    cn = sum(1 for c in text if ord(c) > 127)
+    other = len(text) - cn
+    return max(1, round(cn + other / 4))
+
+
+# FAQ 首问缓存：key=归一化问题，value=(reply, branch, 写入时间戳)
+FAQ_CACHE: dict[str, tuple[str, str, float]] = {}
+FAQ_CACHE_LOCK = threading.Lock()
+
+
+def faq_cache_get(key: str) -> tuple[str, str] | None:
+    with FAQ_CACHE_LOCK:
+        item = FAQ_CACHE.get(key)
+        if not item:
+            return None
+        reply, branch, ts = item
+        if time.time() - ts > FAQ_CACHE_TTL:
+            FAQ_CACHE.pop(key, None)
+            return None
+        return reply, branch
+
+
+def faq_cache_put(key: str, reply: str, branch: str) -> None:
+    with FAQ_CACHE_LOCK:
+        if len(FAQ_CACHE) >= FAQ_CACHE_MAX:
+            # 淘汰最早写入的一条
+            oldest = min(FAQ_CACHE, key=lambda k: FAQ_CACHE[k][2])
+            FAQ_CACHE.pop(oldest, None)
+        FAQ_CACHE[key] = (reply, branch, time.time())
+
 # 日志里不能存明文 IP / 会话 token，统一截断成短哈希，够定位同一会话即可。
 def _hash_for_log(value: str) -> str:
     if not value:
@@ -366,7 +410,7 @@ def _hash_for_log(value: str) -> str:
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "YoumianProxy/1.11"   # 与项目当前版本对齐，方便线上排查
+    server_version = "YoumianProxy/1.12"   # 与项目当前版本对齐，方便线上排查
 
     # 本请求需要下发的 Set-Cookie（新建会话时才会设置）
     _pending_cookie = ""
@@ -586,6 +630,38 @@ class Handler(BaseHTTPRequestHandler):
         slots = SESSIONS.merge_slots(token, extract_slots(message))
         slots_snapshot = "[SLOTS_JSON]" + json.dumps(slots, ensure_ascii=False, separators=(",", ":"))
 
+        # P2-4 成本指标：估算本轮输入 token（用户消息 + 槽位快照 + 系统提示开销）
+        self._chat_in_tok = estimate_tokens(message + slots_snapshot) + PROMPT_OVERHEAD_TOK
+        self._chat_cache_hit = False
+        self._chat_reply = ""
+        self._chat_out_tok = 0
+        resp = None  # 提前初始化，保证 finally 里 resp.close() 在缓存命中路径不报错
+
+        # P2-4 FAQ 缓存：只缓存会话首问（epoch==0），相同问题直接回放，不调用模型。
+        # 归一化 key：去空格转小写，避免「四件套尺寸」和「四件套 尺寸」存两份。
+        cache_key = re.sub(r"\s+", "", message).lower()
+        if epoch == 0:
+            cached = faq_cache_get(cache_key)
+            if cached is not None:
+                cached_reply, cached_branch = cached
+                self._chat_ttft = round(time.time() - self._req_start, 2)
+                self._chat_branch = cached_branch
+                self._chat_reply = cached_reply
+                self._chat_out_tok = estimate_tokens(cached_reply)
+                self._chat_cache_hit = True
+                self._sse_start()
+                self._sse_send("delta", json.dumps({"content": cached_reply}, ensure_ascii=False))
+                if cached_branch:
+                    self._sse_send("branch", json.dumps({"branch": cached_branch}, ensure_ascii=False))
+                self._sse_send("done", "[DONE]")
+                # 缓存命中分支在下面的 try/finally 之外，必须自己收尾：终结 chunked 流 + 写日志
+                try:
+                    self._sse_end()
+                except OSError:
+                    pass
+                self._emit_chat_log(token, message)
+                return  # 不调用扣子
+
         body = {
             "bot_id": COZE_BOT_ID,
             "user_id": user_id,
@@ -645,6 +721,9 @@ class Handler(BaseHTTPRequestHandler):
         self._sse_start()
         try:
             self._pump_stream(resp, token, epoch)
+            # P2-4 FAQ 缓存：首问且成功拿到非空回复、且未转人工时写入缓存，下次同问题直接回放。
+            if epoch == 0 and self._chat_reply and self._chat_branch != "转人工":
+                faq_cache_put(cache_key, self._chat_reply, self._chat_branch)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass  # 用户中途关掉页面，正常情况
         except (OSError, http.client.IncompleteRead):
@@ -655,7 +734,8 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 pass
         finally:
-            resp.close()
+            if resp is not None:
+                resp.close()
             try:
                 self._sse_end()
             except OSError:
@@ -677,6 +757,7 @@ class Handler(BaseHTTPRequestHandler):
         # 结构化时 delta 里是 JSON 片段，必须先攒齐再解析，否则会把花括号吐给用户。
         structured = None
         pieces: list[str] = []
+        reply_text = ""
 
         for raw in resp:
             line = raw.decode("utf-8", "replace").rstrip("\r\n")
@@ -731,6 +812,7 @@ class Handler(BaseHTTPRequestHandler):
                     if self._chat_ttft is None:
                         self._chat_ttft = round(time.time() - self._req_start, 2)
                     self._sse_send("delta", json.dumps({"content": piece}, ensure_ascii=False))
+                    reply_text += piece
                     sent_delta = True
             else:
                 # 完成事件里带的是整段回复，作为兜底
@@ -742,6 +824,7 @@ class Handler(BaseHTTPRequestHandler):
                 # 解析失败不能把 JSON 原样丢给用户，给一句明确的提示
                 self._sse_send("error", json.dumps({"message": "回复格式异常，请再发送一次～"}, ensure_ascii=False))
                 return
+            reply_text = reply
             self._sse_send("delta", json.dumps({"content": reply}, ensure_ascii=False))
             sent_delta = True
             if self._chat_ttft is None:
@@ -749,6 +832,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # 极端情况：没有增量（例如只给了完成事件），一次性补发
         if not sent_delta and completed_answer:
+            reply_text = completed_answer
             self._sse_send("delta", json.dumps({"content": completed_answer}, ensure_ascii=False))
             sent_delta = True
         if conversation_id and not sent_meta:
@@ -757,6 +841,10 @@ class Handler(BaseHTTPRequestHandler):
             # 真实分类标签：前端忽略，评测脚本据此统计路由，不再靠关键词反推
             self._sse_send("branch", json.dumps({"branch": branch}, ensure_ascii=False))
             self._chat_branch = branch
+
+        # P2-4：记录完整回复与输出 token，供成本日志与 FAQ 缓存使用
+        self._chat_reply = reply_text
+        self._chat_out_tok = estimate_tokens(reply_text)
 
         # 上游流异常结束：既没有增量也没有完成事件。直接发 done 会让前端留下空白气泡，
         # 这里改为下发 error，让用户看到明确提示而不是一段沉默。
@@ -826,10 +914,18 @@ class Handler(BaseHTTPRequestHandler):
         print(json.dumps(rec, ensure_ascii=False))
 
     def _emit_chat_log(self, token: str, message: str) -> None:
-        """业务层结构化日志：一行 JSON，可算转人工率、平均轮次、P95 延迟。"""
+        """业务层结构化日志：一行 JSON，可算转人工率、平均轮次、P95 延迟、token 成本。"""
         elapsed = round(time.time() - getattr(self, "_req_start", time.time()), 3)
         branch = getattr(self, "_chat_branch", "") or ""
         handoff = branch == "转人工"
+        cache_hit = bool(getattr(self, "_chat_cache_hit", False))
+        in_tok = int(getattr(self, "_chat_in_tok", 0))
+        out_tok = int(getattr(self, "_chat_out_tok", 0))
+        # 缓存命中不产生模型费用；否则按输入/输出 token 估算成本（元）
+        if cache_hit:
+            cost_yuan = 0.0
+        else:
+            cost_yuan = (in_tok * COZE_IN_PRICE + out_tok * COZE_OUT_PRICE) / 1000
         rec = {
             "t": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
             "level": "chat",
@@ -839,6 +935,10 @@ class Handler(BaseHTTPRequestHandler):
             "ttft": getattr(self, "_chat_ttft", None),
             "elapsed": elapsed,
             "msg_len": len(message),
+            "cache_hit": cache_hit,
+            "in_tok": in_tok,
+            "out_tok": out_tok,
+            "cost": round(cost_yuan, 6),
         }
         print(json.dumps(rec, ensure_ascii=False))
 

@@ -302,7 +302,15 @@ query = {{USER_INPUT}}
 | `output5` | 分支⑥其他兜底LLM输出 |
 
 ### 代码（Python）
+
+v0.0.17（P1-6）起增加**二次解包**：模型偶尔会模仿会话历史里的 JSON 结构，
+在 reply 字段里再套一层 `{"branch": ..., "reply": ...}`。代码节点逐层拆到纯文本，
+拆不干净就当这一路没接到，交回兜底话术——用户永远不会看到 JSON 原文。
+
 ```python
+import json
+import re
+
 async def main(args: Args) -> Output:
     params = args.params
     branches = ['商品咨询', '洗护指南', '物流发货', '退换售后', '优惠活动', '其他兜底']
@@ -317,15 +325,47 @@ async def main(args: Args) -> Output:
     reply = ''
     branch = ''
     for name, o in zip(branches, outputs):
-        if o:
-            reply = o
-            branch = name
+        text = (o if isinstance(o, str) else str(o or '')).strip()
+        # 二次解包：模型偶尔会模仿会话历史里的 JSON，这里逐层拆到纯文本
+        for _ in range(3):
+            if not text:
+                break
+            if text.startswith('```'):
+                text = re.sub(r'^```[a-zA-Z]*\s*', '', text)
+                text = re.sub(r'\s*```$', '', text).strip()
+                continue
+            if text.startswith('{') and text.endswith('}'):
+                try:
+                    obj = json.loads(text)
+                except Exception:
+                    break
+                inner = ''
+                if isinstance(obj, dict):
+                    for key in ('reply', 'content', 'output', 'answer', 'message'):
+                        val = obj.get(key)
+                        if isinstance(val, str) and val.strip():
+                            inner = val.strip()
+                            break
+                if not inner:
+                    break
+                text = inner
+                continue
             break
+        # 清洗后仍是 JSON / 代码块 / 空串，说明这一路没接到，继续看下一路
+        if not text or text[0] in '{[' or text.startswith('```'):
+            continue
+        reply = text
+        branch = name
+        break
     if not reply:
         reply = '抱歉，我这边暂时没接住这个问题～您回复「转人工」，我帮您转接人工客服。'
         branch = '其他兜底'
     return {'reply': reply, 'branch': branch}
 ```
+
+> 配套改动：6 个回复节点的系统提示词末尾统一追加【输出格式（最高优先级）】段落——
+> 只输出纯文本、禁止 JSON 与 reply/branch 字段名、不模仿历史里的 JSON。
+> 提示词负责"不产生"，代码节点负责"产生了也不外泄"，两层缺一不可。
 
 ### 输出
 ```

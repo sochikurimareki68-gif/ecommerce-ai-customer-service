@@ -625,6 +625,51 @@
     .promises li { padding: 9px 0 9px 16px; }
   }
 </style>
+  <!-- ===== I-5 二维码扫码 ===== -->
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+  <style>
+    .qr-fab {
+      position: fixed; bottom: 24px; left: 24px; z-index: 999;
+      width: 48px; height: 48px; border-radius: 50%;
+      background: #2e5b4c; color: #fff; border: none; cursor: pointer;
+      box-shadow: 0 4px 14px rgba(46,91,76,.35);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 500;
+      transition: transform .15s, box-shadow .15s;
+    }
+    .qr-fab:hover { transform: scale(1.06); box-shadow: 0 6px 20px rgba(46,91,76,.45); }
+    @media (max-width: 860px) { .qr-fab { display: none; } }
+
+    .qr-modal {
+      position: fixed; inset: 0; z-index: 1000;
+      background: rgba(0,0,0,.5); backdrop-filter: blur(4px);
+      display: none; align-items: center; justify-content: center;
+    }
+    .qr-modal.show { display: flex; animation: qrFade .18s ease; }
+    @keyframes qrFade { from { opacity: 0; } to { opacity: 1; } }
+
+    .qr-card {
+      background: #fff; border-radius: 16px; padding: 28px;
+      text-align: center; max-width: 320px; width: 90%;
+      box-shadow: 0 20px 60px rgba(0,0,0,.25);
+      animation: qrPop .22s cubic-bezier(.2,.8,.2,1);
+    }
+    @keyframes qrPop { from { transform: scale(.92); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .qr-card h3 {
+      font-size: 15px; font-weight: 600; color: #2c2416; margin-bottom: 6px;
+    }
+    .qr-card p { font-size: 12px; color: #8a7d64; margin-bottom: 18px; }
+    .qr-card canvas {
+      border-radius: 8px; padding: 12px; background: #fff;
+      border: 1px solid #e8e0d1;
+    }
+    .qr-card .close {
+      margin-top: 16px; font-size: 12px; color: #5a4a30;
+      background: #faf7ef; border: 1px solid #e8e0d1;
+      border-radius: 6px; padding: 6px 16px; cursor: pointer;
+    }
+    .qr-card .close:hover { background: #f2eee3; }
+  </style>
 </head>
 <body data-mode="checking">
 
@@ -1199,6 +1244,39 @@
      本项目因此选择 API + 自建后端代理（见 server.py），令牌只留在服务端。
      详细对比见 docs 与仓库 README 的「效果评测 / 技术选型」章节。
      ========================================================== -->
+
+<!-- ===== I-5 二维码扫码 ===== -->
+<button class="qr-fab" id="qrFab" title="扫码访问">📱</button>
+<div class="qr-modal" id="qrModal" onclick="if(event.target===this)closeQR()">
+  <div class="qr-card">
+    <h3>📱 扫码手机访问</h3>
+    <p>优眠小助手 · 移动端自动适配</p>
+    <canvas id="qrCanvas" width="180" height="180"></canvas>
+    <button class="close" onclick="closeQR()">关闭</button>
+  </div>
+</div>
+<script>
+  // I-5 二维码：生成当前页面的 URL（线上自动指向 Render，本地指向 localhost）
+  const QR_URL = window.location.origin + window.location.pathname.replace(/index\.html?$/, '').replace(/\/$/, '');
+  document.getElementById('qrFab').onclick = openQR;
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeQR(); });
+
+  function openQR() {
+    const modal = document.getElementById('qrModal');
+    modal.classList.add('show');
+    // 延迟生成，让动画先跑
+    requestAnimationFrame(() => {
+      const qr = qrcode(0, 'L');
+      qr.addData(QR_URL);
+      qr.make();
+      const canvas = document.getElementById('qrCanvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      qr.draw(ctx, 12);
+    });
+  }
+  function closeQR() { document.getElementById('qrModal').classList.remove('show'); }
+</script>
 
 </body>
 </html>

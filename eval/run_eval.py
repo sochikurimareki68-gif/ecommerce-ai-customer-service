@@ -6,7 +6,7 @@
 
 对 eval/dataset.json 中的用例逐条调用智能体，量化四个指标：
 
-  1. 意图路由准确率 —— 由回复关键词反推实际命中分支，与期望分支比对
+  1. 分支归属一致率 —— 由回复关键词反推实际命中分支，与期望分支比对（v2.0 起仅作参考，不作验收）
   2. 关键信息覆盖率 —— 回复是否答到点上（expect_any 至少命中一个）
   3. 回复规范性     —— 是否出现禁词（冒充人工客服 / XML 标签 / 代码块等）
   4. 响应延迟       —— 平均 / P95 / 最长
@@ -212,7 +212,9 @@ def run_case(case: dict, base_url: str, branch_keywords: dict, forbidden: list[s
 
     if label:
         branch = label
-        result["branch_source"] = "服务端标签"
+        # v2.0 起服务端不再有独立意图路由器，下发的 branch 由回复关键词推断而来，
+        # 不能当作「真实标签」，否则「归属一致率」会变成循环论证。
+        result["branch_source"] = "服务端关键词推断"
     else:
         branch, _ = infer_branch(reply, branch_keywords)
         result["branch_source"] = "关键词反推"
@@ -229,6 +231,10 @@ def run_case(case: dict, base_url: str, branch_keywords: dict, forbidden: list[s
 # ----------------------------------------------------------------------
 # 两句之间的间隔（秒）。给会话落库留时间，也避开「单 IP 每分钟 6 次」。
 MULTI_TURN_GAP = 8
+
+# 安全用例之间的间隔（秒）。用例数正好等于单 IP 每分钟上限（6 次），
+# 不间隔时第 6 条必然被限流挡回，会被误判成「未拒绝」。
+SEC_GAP = 12
 
 
 def build_session_opener():
@@ -515,7 +521,7 @@ def summarize(results: list[dict]) -> dict:
         "total": total,
         "succeeded": len(succeeded),
         "failed": total - len(succeeded),
-        "label_count": sum(1 for r in succeeded if r["branch_source"] == "服务端标签"),
+        "label_count": sum(1 for r in succeeded if r["branch_source"] == "服务端关键词推断"),
         "route_ok": sum(1 for r in results if r["branch_correct"]),
         "keyword_ok": sum(1 for r in results if r["keyword_hit"]),
         "forbidden_ok": sum(1 for r in results if r["ok"] and not r["forbidden_hits"]),
@@ -578,7 +584,7 @@ def update_history_index(version: str, meta: dict, s: dict) -> None:
     a("")
     a("> 每次评测按 `--version` 归档到 `eval/history/`，本表汇总各版本关键指标，可画「版本 → 指标」曲线。")
     a("")
-    a("| 版本 | 时间 | 接口 | 用例数 | 路由准确率 | 关键信息覆盖率 | 回复规范性 | 平均延迟 | 平均首字 |")
+    a("| 版本 | 时间 | 接口 | 用例数 | 分支归属一致率⚠️ | 关键信息覆盖率 | 回复规范性 | 平均延迟 | 平均首字 |")
     a("|------|------|------|-------|-----------|--------------|-----------|---------|---------|")
     for ver in sorted(data.keys()):
         d = data[ver]
@@ -610,8 +616,9 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     a("")
     a("| 指标 | 结果 | 说明 |")
     a("|------|------|------|")
-    a(f"| **意图路由准确率** | **{s['route_pct']}**（{s['route_ok']}/{s['total']}） | 实际分支 == 期望分支；"
-      f"其中 {s['label_count']}/{s['succeeded']} 条为服务端真实标签 |")
+    a(f"| 分支归属一致率 ⚠️ | {s['route_pct']}（{s['route_ok']}/{s['total']}） | 服务端下发的 branch == 期望分支；"
+      f"{s['label_count']}/{s['succeeded']} 条来自服务端。**v2.0 起该指标由关键词推断得出，"
+      f"只反映「回复内容是否落在预期领域」，不能作为意图路由能力的证据** |")
     a(f"| 关键信息覆盖率 | {s['keyword_pct']}（{s['keyword_ok']}/{s['total']}） | 回复命中该分支的预期关键词 |")
     a(f"| 回复规范性 | {s['forbidden_pct']}（{s['forbidden_ok']}/{s['total']}） | 未出现禁词（冒充人工 / XML 标签 / 代码块） |")
     a(f"| 回复长度合理 | {s['length_pct']}（{s['length_ok']}/{s['total']}） | 长度在 15–800 字之间 |")
@@ -622,7 +629,7 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
 
     a("## 二、分支维度")
     a("")
-    a("| 期望分支 | 用例数 | 路由正确 | 路由准确率 | 关键信息命中 |")
+    a("| 期望分支 | 用例数 | 归属一致 | 一致率 | 关键信息命中 |")
     a("|---------|-------|---------|-----------|-------------|")
     for branch, v in s["per_branch"].items():
         rate = f"{v['route'] / v['total'] * 100:.0f}%" if v["total"] else "—"
@@ -643,7 +650,7 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
                 problems.append(f"请求失败（{r['error']}）")
             else:
                 if not r["branch_correct"]:
-                    problems.append("路由不符")
+                    problems.append("归属不一致")
                 if not r["keyword_hit"]:
                     problems.append("未命中关键信息")
                 if r["forbidden_hits"]:
@@ -672,24 +679,25 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     a("## 五、验收结论")
     a("")
     targets = [
-        ("意图路由准确率", s["route_ok"], 0.90),
-        ("关键信息覆盖率", s["keyword_ok"], 0.95),
-        ("回复规范性", s["forbidden_ok"], 1.00),
+        ("① 关键信息覆盖率", s["keyword_ok"], 0.95),
+        ("② 回复规范性", s["forbidden_ok"], 1.00),
     ]
     for name, ok, target in targets:
         rate = ok / s["total"] if s["total"] else 0
         mark = "✅ 达标" if rate >= target else "⚠️ 未达标"
         a(f"- {name}：{rate * 100:.1f}%（目标 ≥ {target * 100:.0f}%）{mark}")
-    weak = [b for b, v in s["per_branch"].items() if v["route"] < v["total"]]
+    a(f"- ③ 意图正确率（人工抽检）：待填 —— 见第七章抽检表，逐条确认回复是否切题后填写百分比。"
+      f"⚠️ 分支归属一致率 {s['route_pct']} 仅供参考，不计入验收。")
+    weak = [b for b, v in s["per_branch"].items() if v["keyword"] < v["total"]]
     if weak:
-        a(f"- 需跟进的分支：{'、'.join(weak)}（详见第三章）")
+        a(f"- 关键信息未全中的分支：{'、'.join(weak)}（详见第二章与第三章）")
     else:
-        a("- 六条分支路由全部正确")
+        a("- 各分支关键信息全部命中")
     a("- 延迟：平均 "
-      f"{s['latency_avg']}s、P95 {s['latency_p95']}s。客服场景可接受，但长回答（知识库检索类）明显偏慢，"
-      "后续可考虑精简知识库条目、或把模型换成更快档位。")
-    a(f"- 首字时间：平均 {s['ttft_avg']}s，其中首字之后只剩 {s['gap_avg']}s——"
-      "说明时间几乎全部花在「等到第一句话」之前，优化方向是压缩前置链路而不是加快打字。")
+      f"{s['latency_avg']}s、P95 {s['latency_p95']}s；首字平均 {s['ttft_avg']}s。"
+      "客服场景可接受，后续可考虑精简知识库条目或换更快模型档位。")
+    a(f"- 流式形态：首字之后平均 {s['gap_avg']}s 才收完。"
+      "v1.x 该值贴近 0（整段一次到达），v2.0 起为秒级，说明回复确实是逐段下发的。")
     a("")
 
     a("## 六、评测方法与局限")
@@ -701,14 +709,55 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     dist_text = "、".join(f"{b} {c} 条" for b, c in dist.items() if c)
     a(f"- **数据来源**：`eval/dataset.json`，共 {s['total']} 条（{dist_text}），覆盖常见问法与边界问法（闲聊、议价、投诉）。")
     a("- **调用方式**：逐条请求 `POST /api/chat`，每条用例使用独立 `user_id` 且不复用会话，保证用例之间互不影响。")
-    a("- **路由判定**：优先使用代理下发的 `branch` 事件——它来自对话流代码节点对六路输出的判断，是**真实标签**；"
-      f"本次 {s['label_count']}/{s['succeeded']} 条拿到了真实标签，未拿到时退回关键词反推，报告里按来源分别统计。")
-    a("- **关键词反推**（仅兜底）：按关键词长度加权打分，越长的短语越具体，得分最高者判为该分支。")
-    a("- **局限**：关键词反推是代理指标，开场白会同时提到多条业务线，边界问法可能误判；真实标签依赖"
-      "结束节点输出 `branch` 字段，若该字段被移除会自动退回反推。")
+    a("- **分支判定**：读取代理下发的 `branch` 事件；未拿到时按关键词长度加权反推，越长的短语越具体。"
+      f"本次 {s['label_count']}/{s['succeeded']} 条来自服务端。")
     a("- **延迟**：包含端到端耗时（浏览器 → 代理 → 扣子 → 模型生成），受网络与模型排队影响，不代表模型自身耗时。")
     a("- **首字时间（TTFT）**：由脚本记录收到第一个 `delta` 事件的时刻，与总耗时分开统计；"
-      "若代理未下发任何 `delta`，该条记为 0 且不参与均值。当前链路首字时间 ≈ 总耗时，是架构限制而非测量误差。")
+      "若代理未下发任何 `delta`，该条记为 0 且不参与均值。")
+    a("")
+    a("### 指标口径变更（v2.0 起，必须说明）")
+    a("")
+    a("v1.x 有独立的选择器节点做意图识别，代码节点把命中分支写进 `branch`，那是一个**真实标签**，"
+      "因此「意图路由准确率」是有效的独立指标。")
+    a("")
+    a("v2.0 把六路合并为单一 LLM 后，**架构里已经不存在独立的路由器**：branch 改由后端 `infer_branch()` "
+      "从回复关键词推断。此时若继续用「推断出的分支 vs 期望分支」算准确率，属于**循环论证**"
+      "——它测的是「回复里有没有出现该领域的词」，不是「系统选对了分支」。")
+    a("")
+    a("因此本报告的处理是：")
+    a("")
+    a("- 该指标降级为 **分支归属一致率**，标 ⚠️，**不计入验收**；")
+    a("- 验收改用 **关键信息覆盖率**（独立于 branch，直接看回复是否答到点）+ **意图正确率**（人工抽检，见第七章）；")
+    a(f"- 历史 v1.x 报告中的「意图路由准确率」仍然有效，但**不可与 v2.0 的同名字段直接比较**。")
+    a("")
+    a("## 七、意图抽检样本（人工确认用，20 条）")
+    a("")
+    a("按分支轮转取样的 20 条，逐条判断「这条回复是否真的回答了用户的问题」，"
+      "在最后一列填 ✅/❌，通过数 ÷ 20 即为**意图正确率**。")
+    a("")
+    a("| # | ID | 用户问题 | 期望分支 | 服务端推断 | 回复前 40 字 | 人工判定 |")
+    a("|---|----|---------|---------|-----------|-------------|---------|")
+    by_branch: dict[str, list[dict]] = {}
+    for r in results:
+        by_branch.setdefault(r["expect"], []).append(r)
+    sample: list[dict] = []
+    i = 0
+    while len(sample) < 20:
+        added = False
+        for b in branch_order:
+            lst = by_branch.get(b, [])
+            if i < len(lst) and len(sample) < 20:
+                sample.append(lst[i])
+                added = True
+        if not added:
+            break
+        i += 1
+    for n, r in enumerate(sample, 1):
+        snippet = (r["reply"] or r["error"] or "—").replace("\n", " ")[:40]
+        a(f"| {n} | {md_cell(r['id'])} | {md_cell(r['input'])} | {md_cell(r['expect'])} | "
+          f"{md_cell(r['branch'] or '—')} | {md_cell(snippet)} |  |")
+    a("")
+    a(f"**意图正确率 =（填 ✅ 的条数）/ {len(sample)}**")
     a("")
     a("### 复现方式")
     a("")
@@ -1038,6 +1087,8 @@ def main() -> int:
         for idx, case in enumerate(scases, 1):
             r = run_security_case(case, args.base)
             sec_results.append(r)
+            if idx < len(scases):
+                time.sleep(SEC_GAP)
             flag = "✅" if r["passed"] else "❌"
             print(f"  [{idx}/{len(scases)}] {flag} {r['id']} {r['category']:<14} {r['verdict']}"
                   f"  首字 {r['ttft']:>4.1f}s")
@@ -1131,7 +1182,7 @@ def main() -> int:
     write_report(meta, s, results)
 
     print("─" * 62)
-    print(f"意图路由准确率 : {s['route_pct']}  ({s['route_ok']}/{s['total']})")
+    print(f"分支归属一致率 : {s['route_pct']}  ({s['route_ok']}/{s['total']})  ⚠️v2.0起为关键词推断，不计入验收")
     print(f"关键信息覆盖率 : {s['keyword_pct']}  ({s['keyword_ok']}/{s['total']})")
     print(f"回复规范性     : {s['forbidden_pct']}  ({s['forbidden_ok']}/{s['total']})")
     print(f"平均延迟       : {s['latency_avg']}s   (P95 {s['latency_p95']}s)")

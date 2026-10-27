@@ -8,5 +8,35 @@
     "forbidden_pct": "100.0%",
     "latency_avg": 13.6,
     "ttft_avg": 13.6
+  },
+  "v2.0.1": {
+    "time": "2026-10-25 23:19",
+    "base": "http://localhost:3000",
+    "total": 31,
+    "route_pct": "83.9%",
+    "keyword_pct": "90.3%",
+    "forbidden_pct": "96.8%",
+    "latency_avg": 11.0,
+    "ttft_avg": 10.2
+  },
+  "v2.0.2": {
+    "time": "2026-10-25 23:36",
+    "base": "http://localhost:3000",
+    "total": 31,
+    "route_pct": "83.9%",
+    "keyword_pct": "100.0%",
+    "forbidden_pct": "100.0%",
+    "latency_avg": 9.4,
+    "ttft_avg": 8.3
+  },
+  "v2.0.3": {
+    "time": "2026-10-25 23:53",
+    "base": "http://localhost:3000",
+    "total": 31,
+    "route_pct": "83.9%",
+    "keyword_pct": "100.0%",
+    "forbidden_pct": "100.0%",
+    "latency_avg": 9.3,
+    "ttft_avg": 8.4
   }
 }

@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>优眠家居 · 家纺床品旗舰商城</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
+    background: #faf7ef; color: #2c2416;
+    line-height: 1.6;
+  }
+  a { color: inherit; text-decoration: none; }
+
+  /* ===== 顶栏 ===== */
+  .topbar {
+    background: #1a1612; color: #d4cfc2;
+    padding: 8px 0; font-size: 13px;
+  }
+  .topbar .wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px;
+    display: flex; justify-content: space-between; }
+
+  /* ===== 导航 ===== */
+  .nav {
+    background: #fff;
+    border-bottom: 1px solid #e8e0d1;
+    position: sticky; top: 0; z-index: 100;
+  }
+  .nav .wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px;
+    display: flex; align-items: center; gap: 40px; height: 64px; }
+  .logo {
+    font-family: "Songti SC", serif;
+    font-size: 26px; font-weight: 700; color: #2e5b4c;
+    letter-spacing: 2px;
+  }
+  .logo small { font-size: 11px; color: #8a6420; font-family: inherit;
+    letter-spacing: 3px; display: block; margin-top: -2px; }
+  .nav-links { display: flex; gap: 28px; font-size: 15px; }
+  .nav-links a:hover { color: #2e5b4c; }
+  .search-box { margin-left: auto; display: flex; }
+  .search-box input {
+    border: 1px solid #d4cfc2; border-right: none;
+    padding: 8px 12px; width: 220px; border-radius: 4px 0 0 4px;
+    font-size: 13px; outline: none;
+  }
+  .search-box button {
+    background: #2e5b4c; color: #fff; border: none;
+    padding: 0 18px; border-radius: 0 4px 4px 0;
+    cursor: pointer; font-size: 13px;
+  }
+
+  /* ===== Hero ===== */
+  .hero {
+    max-width: 1200px; margin: 24px auto; padding: 0 24px;
+    display: grid; grid-template-columns: 1.6fr 1fr; gap: 20px;
+  }
+  .hero-banner {
+    background: linear-gradient(135deg, #e8d5b0 0%, #c8b48a 100%);
+    border-radius: 10px; padding: 48px 40px;
+    min-height: 280px; position: relative; overflow: hidden;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .hero-banner::after {
+    content: "🛏️"; position: absolute; right: 30px; bottom: 20px;
+    font-size: 160px; opacity: 0.3;
+  }
+  .hero-banner h2 {
+    font-family: "Songti SC", serif;
+    font-size: 32px; color: #3d2f1a; margin-bottom: 8px;
+    letter-spacing: 2px;
+  }
+  .hero-banner p { color: #5a4a30; font-size: 15px; margin-bottom: 18px; }
+  .hero-banner .tag {
+    display: inline-block; background: #2e5b4c; color: #fff;
+    padding: 4px 12px; border-radius: 20px; font-size: 12px;
+  }
+  .hero-side {
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .promo {
+    background: #fff; border-radius: 10px; padding: 20px;
+    border: 1px solid #e8e0d1;
+  }
+  .promo h3 { font-size: 15px; color: #c0392b; margin-bottom: 6px; }
+  .promo p { font-size: 13px; color: #6b5d48; }
+  .promo.gift h3 { color: #2e5b4c; }
+
+  /* ===== 分类 ===== */
+  .cats {
+    max-width: 1200px; margin: 20px auto; padding: 0 24px;
+    display: flex; gap: 12px; flex-wrap: wrap;
+  }
+  .cat-chip {
+    background: #fff; border: 1px solid #e8e0d1; border-radius: 24px;
+    padding: 8px 20px; font-size: 13px; cursor: pointer;
+    transition: all .15s;
+  }
+  .cat-chip:hover, .cat-chip.active {
+    background: #2e5b4c; color: #fff; border-color: #2e5b4c;
+  }
+
+  /* ===== 产品 ===== */
+  .products {
+    max-width: 1200px; margin: 24px auto 60px; padding: 0 24px;
+  }
+  .section-title {
+    font-family: "Songti SC", serif;
+    font-size: 22px; color: #2e5b4c; margin-bottom: 4px;
+  }
+  .section-sub { font-size: 13px; color: #8a7d64; margin-bottom: 20px; }
+  .product-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px;
+  }
+  .product-card {
+    background: #fff; border-radius: 10px; overflow: hidden;
+    border: 1px solid #eee6d6; transition: transform .15s, box-shadow .15s;
+  }
+  .product-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 6px 20px rgba(46,91,76,.12);
+  }
+  .product-img {
+    width: 100%; aspect-ratio: 1/1;
+    background: #e8e0d1 center/cover no-repeat;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 60px;
+  }
+  .product-info { padding: 14px 16px 16px; }
+  .product-name {
+    font-size: 14px; color: #2c2416; margin-bottom: 4px;
+    line-height: 1.45;
+  }
+  .product-spec { font-size: 12px; color: #8a7d64; margin-bottom: 8px; }
+  .product-price {
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .price-now { font-size: 20px; font-weight: 700; color: #c0392b; }
+  .price-now::before { content: "¥"; font-size: 13px; font-weight: 500; }
+  .price-old { font-size: 12px; color: #b0a895; text-decoration: line-through; }
+  .product-btns {
+    margin-top: 10px; display: flex; gap: 8px;
+  }
+  .btn-cart {
+    flex: 1; background: #2e5b4c; color: #fff;
+    border: none; border-radius: 6px; padding: 7px 0;
+    font-size: 13px; cursor: pointer;
+  }
+  .btn-cart:hover { background: #1f4235; }
+  .btn-ask {
+    background: transparent; border: 1px solid #2e5b4c;
+    color: #2e5b4c; border-radius: 6px; padding: 7px 12px;
+    font-size: 13px; cursor: pointer;
+  }
+  .btn-ask:hover { background: #2e5b4c; color: #fff; }
+
+  /* ===== 底部 ===== */
+  footer {
+    background: #1a1612; color: #8a7d64;
+    padding: 32px 0; font-size: 13px;
+  }
+  footer .wrap { max-width: 1200px; margin: 0 auto; padding: 0 24px;
+    display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 32px; }
+  footer h4 { color: #d4cfc2; margin-bottom: 12px; font-size: 14px; }
+  footer a { display: block; padding: 2px 0; }
+  footer a:hover { color: #2e5b4c; }
+  .copyright {
+    text-align: center; margin-top: 28px; padding-top: 18px;
+    border-top: 1px solid #3d2f1a; font-size: 12px; color: #5a4a30;
+  }
+
+  @media (max-width: 900px) {
+    .product-grid { grid-template-columns: repeat(2, 1fr); }
+    .hero { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ 顶栏 ============ -->
+<div class="topbar">
+  <div class="wrap">
+    <span>🛏️ 优眠家居 · 十年专注家纺床品</span>
+    <span>7 天无理由退换 · 满 199 包邮 · 48h 发货</span>
+  </div>
+</div>
+
+<!-- ============ 导航 ============ -->
+<nav class="nav">
+  <div class="wrap">
+    <div class="logo">优眠家居<small>YOUMIAN HOMETEXTILE</small></div>
+    <div class="nav-links">
+      <a href="#">首页</a>
+      <a href="#">四件套</a>
+      <a href="#">被芯</a>
+      <a href="#">枕芯枕套</a>
+      <a href="#">洗护指南</a>
+      <a href="#">品牌故事</a>
+    </div>
+    <div class="search-box">
+      <input type="text" placeholder="搜索 纯棉四件套、天丝、被芯…">
+      <button>搜</button>
+    </div>
+  </div>
+</nav>
+
+<!-- ============ Hero ============ -->
+<section class="hero">
+  <div class="hero-banner">
+    <span class="tag">🏷️ 限时活动 · 满 399 立减 50</span>
+    <h2>好床品，睡得香</h2>
+    <p>100% 新疆长绒棉 · OEKO-TEX 环保认证 · 亲肤透气不闷汗<br>
+    这个季节换一套，每晚都是五星级睡眠</p>
+  </div>
+  <div class="hero-side">
+    <div class="promo">
+      <h3>🎉 新客专享</h3>
+      <p>首次下单领 5 元无门槛优惠券，限时 3 天</p>
+    </div>
+    <div class="promo gift">
+      <h3>🎁 买就送</h3>
+      <p>满 299 送纯棉枕套一对，满 599 送真丝眼罩</p>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 分类 ============ -->
+<div class="cats">
+  <span class="cat-chip active">全部</span>
+  <span class="cat-chip">四件套</span>
+  <span class="cat-chip">被芯</span>
+  <span class="cat-chip">枕芯</span>
+  <span class="cat-chip">浴巾毛巾</span>
+  <span class="cat-chip">凉席</span>
+  <span class="cat-chip">冬被</span>
+</div>
+
+<!-- ============ 产品列表 ============ -->
+<section class="products">
+  <h2 class="section-title">热销床品</h2>
+  <p class="section-sub">10 万+ 家庭的睡眠之选，品质由你看得见</p>
+
+  <div class="product-grid">
+
+    <!-- 产品 1 -->
+    <div class="product-card">
+      <div class="product-img" style="background-image: linear-gradient(135deg,#c9b79c,#a08874);">🛏️</div>
+      <div class="product-info">
+        <div class="product-name">磨毛纯棉四件套 · 暖冬系列</div>
+        <div class="product-spec">1.8m 床 · 被套 220×240 · 卡其米</div>
+        <div class="product-price">
+          <span class="price-now">299</span>
+          <span class="price-old">399</span>
+        </div>
+        <div class="product-btns">
+          <button class="btn-cart">加入购物车</button>
+          <button class="btn-ask" onclick="window.__yewToggle?.()">立即咨询</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 产品 2 -->
+    <div class="product-card">
+      <div class="product-img" style="background-image: linear-gradient(135deg,#e8d5b0,#b8a474);">🛌</div>
+      <div class="product-info">
+        <div class="product-name">天丝贡缎四件套 · 凉感系列</div>
+        <div class="product-spec">1.5m 床 · 被套 200×230 · 冰川蓝</div>
+        <div class="product-price">
+          <span class="price-now">359</span>
+          <span class="price-old">459</span>
+        </div>
+        <div class="product-btns">
+          <button class="btn-cart">加入购物车</button>
+          <button class="btn-ask">立即咨询</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 产品 3 -->
+    <div class="product-card">
+      <div class="product-img" style="background-image: linear-gradient(135deg,#d4e4dc,#9cb8a8);">🦢</div>
+      <div class="product-info">
+        <div class="product-name">95% 白鹅绒冬被 · 蓬松度 800+</div>
+        <div class="product-spec">220×240cm · 填充 1200g · 冬季加厚</div>
+        <div class="product-price">
+          <span class="price-now">1299</span>
+          <span class="price-old">1699</span>
+        </div>
+        <div class="product-btns">
+          <button class="btn-cart">加入购物车</button>
+          <button class="btn-ask">立即咨询</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 产品 4 -->
+    <div class="product-card">
+      <div class="product-img" style="background-image: linear-gradient(135deg,#f0e8d8,#c8b898);">🌿</div>
+      <div class="product-info">
+        <div class="product-name">桑蚕丝四季被 · 长丝绵 100%</div>
+        <div class="product-spec">220×240cm · 填充 500g · 恒温透气</div>
+        <div class="product-price">
+          <span class="price-now">899</span>
+          <span class="price-old">1199</span>
+        </div>
+        <div class="product-btns">
+          <button class="btn-cart">加入购物车</button>
+          <button class="btn-ask">立即咨询</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 产品 5 -->
+    <div class="product-card">
+      <div class="product-img" style="background-image: linear-gradient(135deg,#e8dcd0,#b8a484);">🌾</div>
+      <div class="product-info">
+        <div class="product-name">大豆纤维春秋被 · A 类婴幼儿级</div>
+        <div class="product-spec">220×240cm · 填充 800g · 柔软亲肤</div>
+        <div class="product-price">
+          <span class="price-now">269</span>
+          <span class="price-old">349</span>
+        </div>
+        <div class="product-btns">
+          <button class="btn-cart">加入购物车</button>
+          <button class="btn-ask">立即咨询</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 产品 6 -->
+    <div class="product-card">
+      <div class="product-img" style="background-image: linear-gradient(135deg,#dcd0c0,#a8947c);">💤</div>
+      <div class="product-info">
+        <div class="product-name">慢回弹记忆棉枕芯 · 护颈款</div>
+        <div class="product-spec">40×60cm · 高 10cm · 人体工学</div>
+        <div class="product-price">
+          <span class="price-now">89</span>
+          <span class="price-old">129</span>
+        </div>
+        <div class="product-btns">
+          <button class="btn-cart">加入购物车</button>
+          <button class="btn-ask">立即咨询</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 产品 7 -->
+    <div class="product-card">
+      <div class="product-img" style="background-image: linear-gradient(135deg,#c8d8c8,#789888);">🧶</div>
+      <div class="product-info">
+        <div class="product-name">新疆长绒棉床单 · 贡缎 60 支</div>
+        <div class="product-spec">250×270cm · 1.8m 床 · 象牙白</div>
+        <div class="product-price">
+          <span class="price-now">139</span>
+          <span class="price-old">199</span>
+        </div>
+        <div class="product-btns">
+          <button class="btn-cart">加入购物车</button>
+          <button class="btn-ask">立即咨询</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 产品 8 -->
+    <div class="product-card">
+      <div class="product-img" style="background-image: linear-gradient(135deg,#d8d0c8,#988880);">🌙</div>
+      <div class="product-info">
+        <div class="product-name">乳胶枕芯 · 泰国进口天然乳胶</div>
+        <div class="product-spec">40×60cm · 波浪款 · 透气孔设计</div>
+        <div class="product-price">
+          <span class="price-now">199</span>
+          <span class="price-old">289</span>
+        </div>
+        <div class="product-btns">
+          <button class="btn-cart">加入购物车</button>
+          <button class="btn-ask">立即咨询</button>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============ 底部 ============ -->
+<footer>
+  <div class="wrap">
+    <div>
+      <h4>关于优眠</h4>
+      <p style="color:#8a7d64;font-size:13px;line-height:1.8;">
+        优眠家居成立于 2014 年，专注中高端家纺床品。<br>
+        工厂位于浙江绍兴，自有纺织生产线，<br>
+        从纱线到成品全程可控，品质稳定。
+      </p>
+    </div>
+    <div>
+      <h4>购物指南</h4>
+      <a href="#">尺码推荐</a>
+      <a href="#">洗护说明</a>
+      <a href="#">常见问题</a>
+      <a href="#">联系客服</a>
+    </div>
+    <div>
+      <h4>配送与售后</h4>
+      <a href="#">发货时效</a>
+      <a href="#">运费说明</a>
+      <a href="#">7 天无理由退换</a>
+      <a href="#">品质保证</a>
+    </div>
+    <div>
+      <h4>关注我们</h4>
+      <a href="#">微信公众号</a>
+      <a href="#">小红书</a>
+      <a href="#">天猫旗舰店</a>
+      <a href="#">抖音小店</a>
+    </div>
+  </div>
+  <div class="copyright">© 2026 优眠家居 YOUMIAN · 本页面为演示用途 · 真实店铺请访问官方旗舰店</div>
+</footer>
+
+<!-- ============ 挂件加载器（I-3 核心）============ -->
+<script src="widget-loader.js"
+        data-widget-url="http://localhost:3000/?widget=1"
+        data-primary-color="#2e5b4c"
+        async defer></script>
+
+<!-- 产品卡片「立即咨询」按钮也能触发气泡展开（可选增强） -->
+<script>
+  // 把 widget-loader 的 toggle 暴露出来，供"立即咨询"按钮调用
+  window.addEventListener('load', function () {
+    // 稍等 loader 执行完
+    setTimeout(function () {
+      var loaderScript = document.querySelector('script[src*="widget-loader"]');
+      if (loaderScript && window.__YOUmianWidgetLoaded) {
+        // loader 内部没有暴露 toggle，这里通过点击按钮触发
+        window.__yewToggle = function () {
+          var btn = document.querySelector('.yew-widget-btn');
+          if (btn) btn.click();
+        };
+      }
+    }, 100);
+  });
+</script>
+
+</body>
+</html>

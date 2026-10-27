@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>测试宿主页 · 接入 widget-loader</title>
+<style>
+  body { font-family: -apple-system, sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; }
+  h1 { color: #2e5b4c; }
+  .note { background: #f2eee3; padding: 12px 16px; border-radius: 6px; margin: 20px 0; }
+  code { background: #efeade; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>测试宿主页</h1>
+  <p>这是一个用来验证 widget-loader.js 能否正常挂载气泡按钮的普通 HTML。</p>
+  <p>右下角应该出现一个绿色圆形气泡（客服图标），点击展开聊天框。</p>
+  <div class="note">
+    接入代码（<b>真实店铺只需要这一行</b>）：
+    <pre><code>&lt;script src="widget-loader.js"
+  data-widget-url="http://localhost:3000/?widget=1"
+  async defer&gt;&lt;/script&gt;</code></pre>
+  </div>
+
+  <!-- ============ 挂件加载器（步骤 2 验收点）============ -->
+  <script src="widget-loader.js"
+          data-widget-url="http://localhost:3000/?widget=1"
+          data-primary-color="#2e5b4c"
+          async defer></script>
+</body>
+</html>

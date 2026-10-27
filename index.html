@@ -105,6 +105,23 @@
 
   button { font-family: inherit; }
 
+  /* ================= 挂件模式（?widget=1）================= */
+  body.widget-mode {
+    background: transparent;
+    padding: 0;
+    min-height: 100vh;
+    place-items: stretch;
+  }
+  body.widget-mode .brand-panel { display: none !important; }
+  body.widget-mode .app {
+    width: 100%;
+    height: 100vh;
+    grid-template-columns: 1fr;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
   /* ================= 双栏外壳 ================= */
   .app {
     width: min(1160px, 100%);
@@ -702,6 +719,17 @@
 </div>
 
 <script>
+  // ===== 挂件模式检测（I-3）=====
+  // URL 带 ?widget=1 时：加 body class，CSS 自动隐藏品牌栏 + 去圆角边框阴影 + 透明背景
+  // 同一套前端同时服务独立版与挂件版，不需要复制文件
+  (function () {
+    const params = new URLSearchParams(location.search);
+    if (params.get('widget') === '1') {
+      document.body.classList.add('widget-mode');
+      document.title = '优眠小助手';
+    }
+  })();
+
   // ==========================================
   //  优眠家居 AI 智能客服 - 前端页面
   //

@@ -1014,6 +1014,14 @@ class Handler(BaseHTTPRequestHandler):
             sent_delta = True
         if conversation_id and not sent_meta:
             self._sse_send("meta", json.dumps({"conversation_id": conversation_id}, ensure_ascii=False))
+
+        # 上游流异常结束：既没有增量也没有完成事件。直接发 done 会让前端留下空白气泡，
+        # 这里改为下发 error，让用户看到明确提示而不是一段沉默。
+        # 注意：必须在发 branch 之前拦截，否则失败的请求也会带一个分类标签，污染路由统计。
+        if not sent_delta:
+            self._sse_send("error", json.dumps({"message": "响应超时了，请再发送一次～"}, ensure_ascii=False))
+            return
+
         if not branch:
             # v2.0：结束节点只返回 reply 纯文本，不再有代码节点判定的 branch，按关键词推断
             branch = infer_branch(message, reply_text or completed_answer)
@@ -1039,12 +1047,6 @@ class Handler(BaseHTTPRequestHandler):
         # P2-4：记录完整回复与输出 token，供成本日志与 FAQ 缓存使用
         self._chat_reply = reply_text
         self._chat_out_tok = estimate_tokens(reply_text)
-
-        # 上游流异常结束：既没有增量也没有完成事件。直接发 done 会让前端留下空白气泡，
-        # 这里改为下发 error，让用户看到明确提示而不是一段沉默。
-        if not sent_delta:
-            self._sse_send("error", json.dumps({"message": "响应超时了，请再发送一次～"}, ensure_ascii=False))
-            return
 
         self._sse_send("done", "[DONE]")
 

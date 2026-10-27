@@ -17,6 +17,7 @@ import http.client
 import json
 import sys
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -50,6 +51,8 @@ class FakeSse:
 
     def __init__(self):
         self.events = []
+        # v2.0 起 _pump_stream 会在首字时记录 TTFT，需要一个请求起始时间戳
+        self._req_start = time.time()
 
     def _sse_send(self, event, data):
         self.events.append((event, data))
@@ -324,9 +327,11 @@ class PumpStreamTest(unittest.TestCase):
         )
         server.Handler._pump_stream(fake, resp, "token")
         kinds = [e for e, _ in fake.events]
-        self.assertEqual(kinds, ["meta", "delta", "delta", "done"])
+        # v2.0 起流末尾固定补一个 branch 事件（按关键词推断），前端忽略、评测统计用
+        self.assertEqual(kinds, ["meta", "delta", "delta", "branch", "done"])
         self.assertEqual(json.loads(fake.events[0][1])["conversation_id"], "c1")
         self.assertEqual(json.loads(fake.events[1][1])["content"], "你好")
+        self.assertEqual(json.loads(fake.events[3][1])["branch"], "其他兜底")
 
     def test_completed_message_falls_back_to_single_delta(self):
         fake = FakeSse()
@@ -338,7 +343,7 @@ class PumpStreamTest(unittest.TestCase):
         )
         server.Handler._pump_stream(fake, resp, "token")
         kinds = [e for e, _ in fake.events]
-        self.assertEqual(kinds, ["meta", "delta", "done"])
+        self.assertEqual(kinds, ["meta", "delta", "branch", "done"])
         self.assertEqual(json.loads(fake.events[1][1])["content"], "整段回答")
 
     def test_error_event_is_translated(self):

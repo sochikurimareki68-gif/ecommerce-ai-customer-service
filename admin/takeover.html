@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>优眠小助手 · 人工接管（轻量版 · 只读）</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", system-ui, sans-serif;
+    background: #f5f2ea; color: #2c2416; height: 100vh; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  header {
+    background: #1c1c1a; color: #fff; padding: 12px 24px;
+    display: flex; justify-content: space-between; align-items: center;
+    box-shadow: 0 1px 4px rgba(0,0,0,.12);
+  }
+  header h1 { font-family: "Songti SC", serif; font-size: 18px; font-weight: 600; letter-spacing: 1px; }
+  header .hint { font-size: 12px; color: #a8a59e; }
+  header .hint b { color: #f0a040; }
+
+  .toolbar {
+    background: #fff; border-bottom: 1px solid #e8e0d1;
+    padding: 10px 24px; display: flex; gap: 10px; align-items: center;
+  }
+  .toolbar button {
+    background: #2e5b4c; color: #fff; border: none; border-radius: 4px;
+    padding: 6px 16px; font-size: 13px; cursor: pointer;
+  }
+  .toolbar button:hover { background: #1f4235; }
+  .toolbar button.ghost {
+    background: transparent; border: 1px solid #d9d4c8; color: #4a4a45;
+  }
+  .toolbar button.ghost:hover { background: #f2eee3; }
+  .toolbar .spacer { flex: 1; }
+  .counter {
+    font-size: 13px; color: #4a4a45;
+  }
+  .counter b {
+    color: #c0392b; font-weight: 700; font-size: 18px;
+  }
+
+  main {
+    flex: 1; display: grid; grid-template-columns: 360px 1fr;
+    overflow: hidden;
+  }
+
+  /* ===== 左：队列列表 ===== */
+  .queue {
+    background: #fff; border-right: 1px solid #e8e0d1;
+    overflow-y: auto;
+  }
+  .empty {
+    padding: 40px 20px; text-align: center; color: #a8a59e; font-size: 13px;
+  }
+  .empty .emoji { font-size: 40px; margin-bottom: 10px; }
+  .queue-item {
+    border-bottom: 1px solid #f0ebe0;
+    padding: 12px 16px; cursor: pointer;
+    transition: background .12s;
+  }
+  .queue-item:hover { background: #f9f6ee; }
+  .queue-item.active { background: #2e5b4c; color: #fff; }
+  .queue-item.active .q-preview { color: #d4e8dd; }
+  .queue-item.active .q-meta { color: #a8c4b8; }
+
+  .q-meta {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; color: #8a7d64; margin-bottom: 4px;
+  }
+  .q-meta .badge {
+    background: #e8d5b0; color: #5a4a30;
+    padding: 1px 8px; border-radius: 10px; font-size: 10px;
+  }
+  .queue-item.active .q-meta .badge { background: #1f4235; color: #a8c4b8; }
+
+  .q-preview {
+    font-size: 13px; color: #2c2416; line-height: 1.4;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* ===== 右：对话详情 ===== */
+  .detail {
+    display: flex; flex-direction: column;
+    background: #faf7ef;
+  }
+  .detail-header {
+    background: #fff; border-bottom: 1px solid #e8e0d1;
+    padding: 12px 24px; display: flex; justify-content: space-between; align-items: center;
+  }
+  .detail-header h2 {
+    font-size: 14px; color: #2c2416; font-weight: 600;
+  }
+  .detail-header h2 .sid {
+    font-family: "JetBrains Mono", Consolas, monospace; font-size: 12px;
+    color: #8a7d64; margin-left: 8px;
+  }
+  .detail-header .actions { display: flex; gap: 8px; }
+
+  .chat-flow {
+    flex: 1; overflow-y: auto; padding: 20px 24px;
+  }
+  .chat-flow .msg {
+    margin-bottom: 16px; display: flex; gap: 10px; align-items: flex-start;
+  }
+  .chat-flow .msg.user { justify-content: flex-end; }
+  .chat-flow .msg .avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0;
+  }
+  .chat-flow .msg.user .avatar { background: #2e5b4c; color: #fff; }
+  .chat-flow .msg.assistant .avatar { background: #fff; border: 1px solid #e8e0d1; }
+  .chat-flow .bubble {
+    max-width: 70%; padding: 10px 14px; border-radius: 8px;
+    font-size: 13px; line-height: 1.55; word-break: break-word;
+    white-space: pre-wrap;
+  }
+  .chat-flow .msg.user .bubble { background: #2e5b4c; color: #fff; }
+  .chat-flow .msg.assistant .bubble { background: #fff; border: 1px solid #e8e0d1; }
+  .chat-flow .time {
+    font-size: 10px; color: #a8a59e; margin-top: 3px;
+  }
+
+  .detail-empty {
+    flex: 1; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    color: #a8a59e; font-size: 14px;
+  }
+  .detail-empty .emoji { font-size: 50px; margin-bottom: 14px; opacity: .6; }
+
+  footer {
+    padding: 8px 24px; font-size: 11px; color: #a8a59e;
+    background: #fff; border-top: 1px solid #e8e0d1;
+    text-align: center;
+  }
+  footer b { color: #c0392b; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="title">
+    <h1>优眠小助手 · 人工接管面板</h1>
+    <div class="hint">轻量版 · <b>只读</b> · 标记已处理 · 无人工下发能力</div>
+  </div>
+  <div class="env">
+    <span style="font-size:11px;color:#a8a59e;">v2.0.3 · server.py 1.13 · I-4</span>
+  </div>
+</header>
+
+<div class="toolbar">
+  <button onclick="refresh()">🔄 刷新队列</button>
+  <span class="counter">待处理 <b id="pendingCount">0</b> 条</span>
+  <div class="spacer"></div>
+  <button class="ghost" onclick="refresh()">查看所有</button>
+</div>
+
+<main>
+  <!-- 左：队列列表 -->
+  <section class="queue" id="queueList">
+    <div class="empty">
+      <div class="emoji">📭</div>
+      加载中...
+    </div>
+  </section>
+
+  <!-- 右：对话详情 -->
+  <section class="detail" id="detail">
+    <div class="detail-empty">
+      <div class="emoji">👈</div>
+      从左边选择一条待接管会话查看详情
+    </div>
+  </section>
+</main>
+
+<footer>
+  ⚠️ 轻量版：人工接管后不会向用户下发任何回复。需要回复用户请通过电话/IM 等其他渠道。
+  面试时可说明"下一步加 resolved 标记 + 审计日志 + token 鉴权"。
+</footer>
+
+<script>
+const BASE = window.location.origin;
+let selectedSid = null;
+
+async function refresh() {
+  try {
+    const r = await fetch(BASE + "/api/pending");
+    const data = await r.json();
+    document.getElementById("pendingCount").textContent = data.pending;
+    renderQueue(data.items);
+  } catch (e) {
+    document.getElementById("queueList").innerHTML =
+      '<div class="empty"><div class="emoji">❌</div>连接后端失败，请确认 server.py 正在运行</div>';
+  }
+}
+
+function renderQueue(items) {
+  const el = document.getElementById("queueList");
+  if (!items.length) {
+    el.innerHTML = '<div class="empty"><div class="emoji">🎉</div>队列干净，暂无待接管会话</div>';
+    return;
+  }
+  el.innerHTML = items.map(item => `
+    <div class="queue-item ${selectedSid === item.session_id ? 'active' : ''}"
+         onclick="selectItem('${item.session_id}')">
+      <div class="q-meta">
+        <span>${item.time_str} · IP ${item.user_ip_hash.slice(0,8)}…</span>
+        <span class="badge">${item.msg_count} 条消息</span>
+      </div>
+      <div class="q-preview">👤 ${item.last_user}</div>
+      <div class="q-preview" style="font-size:12px;color:#a8a59e;margin-top:2px;">🤖 ${item.last_reply_preview}</div>
+    </div>
+  `).join("");
+}
+
+async function selectItem(sid) {
+  selectedSid = sid;
+  refresh(); // 更新高亮
+  try {
+    const r = await fetch(BASE + "/api/session/" + encodeURIComponent(sid));
+    if (!r.ok) { throw new Error("not found"); }
+    const data = await r.json();
+    renderDetail(data);
+  } catch (e) {
+    document.getElementById("detail").innerHTML =
+      '<div class="detail-empty"><div class="emoji">❓</div>会话不存在或已被清理</div>';
+  }
+}
+
+function renderDetail(data) {
+  const msgs = data.messages.map(m => {
+    if (m.role === "user") {
+      return `<div class="msg user">
+        <div class="bubble">${escapeHtml(m.text)}</div>
+        <div class="avatar">👤</div>
+      </div>`;
+    }
+    return `<div class="msg assistant">
+      <div class="avatar">🤖</div>
+      <div>
+        <div class="bubble">${escapeHtml(m.text)}</div>
+        <div class="time">${m.time}</div>
+      </div>
+    </div>`;
+  }).join("");
+
+  document.getElementById("detail").innerHTML = `
+    <div class="detail-header">
+      <h2>完整对话 <span class="sid">session_id: ${data.session_id}…</span></h2>
+      <div class="actions">
+        <button class="ghost" onclick="selectItem('${data.session_id}')">🔄 刷新详情</button>
+        <button onclick="resolve('${data.session_id}')">✅ 标记已处理</button>
+      </div>
+    </div>
+    <div class="chat-flow">${msgs}</div>
+    <div style="padding:8px 24px;font-size:11px;color:#a8a59e;border-top:1px solid #e8e0d1;background:#fff;">
+      入队时间 ${data.time_str} · 用户 IP 哈希 ${data.user_ip_hash} · 轻量版只读，无法在此回复用户
+    </div>
+  `;
+}
+
+async function resolve(sid) {
+  if (!confirm("标记已处理？该会话将从队列移除。\n\n注意：轻量版不会向用户下发任何回复。")) return;
+  try {
+    const r = await fetch(BASE + "/api/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sid })
+    });
+    if (!r.ok) throw new Error("resolve failed");
+    selectedSid = null;
+    document.getElementById("detail").innerHTML =
+      '<div class="detail-empty"><div class="emoji">👈</div>已处理，从队列选择下一条</div>';
+    refresh();
+  } catch (e) {
+    alert("标记失败：" + e.message);
+  }
+}
+
+function escapeHtml(s) {
+  const d = document.createElement("div");
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// 启动
+refresh();
+// 每 10 秒自动刷新（演示时方便，生产可关）
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

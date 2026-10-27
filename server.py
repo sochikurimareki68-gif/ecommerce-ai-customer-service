@@ -437,6 +437,39 @@ def faq_cache_put(key: str, reply: str, branch: str) -> None:
             FAQ_CACHE.pop(oldest, None)
         FAQ_CACHE[key] = (reply, branch, time.time())
 
+# ==================== I-4 人工接管轻量版 ====================
+# 转人工时自动入队，供只读接管页 /admin/takeover.html 查看。
+# 数据结构：pending_handoff[session_id] = {
+#     "ts": 入队时间戳,
+#     "user_ip_hash": IP 短哈希（脱敏）,
+#     "messages": [{"role": "user"/"assistant", "text": "...", "ts": ...}, ...],
+#     "last_reply": 转接话术原文,
+#     "resolved": False,
+# }
+PENDING_HANDOFF: dict[str, dict] = {}
+PENDING_HANDOFF_LOCK = threading.Lock()
+PENDING_HANDOFF_MAX = 200          # 队列上限，防内存泄漏
+
+def record_handoff(session_id: str, user_ip: str, last_reply: str,
+                   messages: list[dict]) -> None:
+    """把一次转人工会话入队（幂等，同 session 只记录第一次）。"""
+    if not session_id:
+        return
+    with PENDING_HANDOFF_LOCK:
+        if session_id in PENDING_HANDOFF:
+            return
+        # 队列满时淘汰最旧（按 ts 排序）
+        if len(PENDING_HANDOFF) >= PENDING_HANDOFF_MAX:
+            oldest = min(PENDING_HANDOFF, key=lambda k: PENDING_HANDOFF[k]["ts"])
+            PENDING_HANDOFF.pop(oldest, None)
+        PENDING_HANDOFF[session_id] = {
+            "ts": time.time(),
+            "user_ip_hash": _hash_for_log(user_ip),
+            "messages": list(messages),        # 浅拷贝，防止后续修改
+            "last_reply": last_reply,
+            "resolved": False,
+        }
+
 # 日志里不能存明文 IP / 会话 token，统一截断成短哈希，够定位同一会话即可。
 def _hash_for_log(value: str) -> str:
     if not value:
@@ -553,6 +586,14 @@ class Handler(BaseHTTPRequestHandler):
                 "version": self.server_version,
             })
             return
+        # I-4：人工接管轻量版 API（只读，无鉴权；demo 阶段面试时说"下一步加 token"）
+        if path == "/api/pending":
+            self._handle_pending_list()
+            return
+        if path.startswith("/api/session/"):
+            sid = path[len("/api/session/"):]
+            self._handle_pending_detail(sid)
+            return
         self._serve_static(path)
 
     def do_POST(self) -> None:  # noqa: N802
@@ -564,6 +605,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/reset":
             self._handle_reset()
+            return
+        # I-4：人工接管——标记已处理（从队列移除）
+        if path == "/api/resolve":
+            self._handle_pending_resolve()
             return
         self._reject(404, "接口不存在")
 
@@ -616,6 +661,101 @@ class Handler(BaseHTTPRequestHandler):
         epoch = SESSIONS.reset(token)
         self._pending_cookie = self._session_cookie(token)
         self._send_json(200, {"ok": True, "epoch": epoch})
+
+    # ------------------------------------------------------------------
+    # I-4 人工接管轻量版（只读队列 + 标记已处理）
+    # ------------------------------------------------------------------
+    def _handle_pending_list(self) -> None:
+        """GET /api/pending —— 列出所有待接管会话（摘要）。"""
+        with PENDING_HANDOFF_LOCK:
+            items = []
+            for sid, entry in PENDING_HANDOFF.items():
+                if entry.get("resolved"):
+                    continue
+                items.append({
+                    "session_id": sid[:12],            # cookie token 只取前 12 位展示，不暴露完整
+                    "session_len": len(sid),            # 给人工确认是否为真 token 时参考
+                    "ts": entry["ts"],
+                    "time_str": datetime.fromtimestamp(entry["ts"]).strftime("%H:%M:%S"),
+                    "user_ip_hash": entry["user_ip_hash"],
+                    "last_user": entry["messages"][0]["text"][:40] if entry["messages"] else "",
+                    "last_reply_preview": entry["last_reply"][:60],
+                    "msg_count": len(entry["messages"]),
+                })
+            items.sort(key=lambda x: x["ts"])   # 按入队时间正序
+            unresolved = len(items)
+            resolved = sum(1 for e in PENDING_HANDOFF.values() if e.get("resolved"))
+        self._send_json(200, {
+            "pending": unresolved,
+            "resolved": resolved,
+            "queue_max": PENDING_HANDOFF_MAX,
+            "items": items,
+        })
+
+    def _handle_pending_detail(self, sid: str) -> None:
+        """GET /api/session/{id} —— 查看某会话完整历史（只读）。"""
+        with PENDING_HANDOFF_LOCK:
+            # 支持用完整 token 或前 12 位查询
+            key = sid if sid in PENDING_HANDOFF else None
+            if key is None:
+                for k in PENDING_HANDOFF:
+                    if k.startswith(sid):
+                        key = k
+                        break
+            if key is None:
+                self._send_json(404, {"error": "会话不存在或已被清理"})
+                return
+            entry = PENDING_HANDOFF[key]
+            detail = {
+                "session_id": key[:12],
+                "time_str": datetime.fromtimestamp(entry["ts"]).strftime("%Y-%m-%d %H:%M:%S"),
+                "user_ip_hash": entry["user_ip_hash"],
+                "resolved": entry.get("resolved", False),
+                "messages": [
+                    {
+                        "role": m["role"],
+                        "text": m["text"],
+                        "time": datetime.fromtimestamp(m.get("ts", entry["ts"])).strftime("%H:%M:%S"),
+                    }
+                    for m in entry["messages"]
+                ],
+            }
+        self._send_json(200, detail)
+
+    def _handle_pending_resolve(self) -> None:
+        """POST /api/resolve —— 标记某会话已处理（从队列移除/或 resolved=True）。
+
+        请求体：{"session_id": "..."}
+        """
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length > MAX_BODY_BYTES:
+                self._reject(413, "请求体过大")
+                return
+            body = self.rfile.read(length).decode("utf-8") if length else "{}"
+            data = json.loads(body)
+        except (ValueError, json.JSONDecodeError):
+            self._reject(400, "请求体必须是合法 JSON")
+            return
+
+        sid = data.get("session_id", "").strip()
+        if not sid:
+            self._reject(400, "缺少 session_id")
+            return
+
+        with PENDING_HANDOFF_LOCK:
+            key = sid if sid in PENDING_HANDOFF else None
+            if key is None:
+                for k in PENDING_HANDOFF:
+                    if k.startswith(sid):
+                        key = k
+                        break
+            if key is None:
+                self._send_json(404, {"error": "会话不存在或已被清理"})
+                return
+            # 直接移除（轻量版不保留已处理历史；面试时说"后续加 resolved 标记保留可审计"）
+            del PENDING_HANDOFF[key]
+        self._send_json(200, {"ok": True})
 
     # ------------------------------------------------------------------
     # 对话代理
@@ -883,6 +1023,18 @@ class Handler(BaseHTTPRequestHandler):
         # 转人工判定：分支标签里没有「转人工」（转接话术按内容归「其他兜底」，与评测期望一致），
         # 是否转人工单独按回复里的转接话术判定，供日志统计与 FAQ 缓存排除
         self._chat_handoff = any(marker in reply_text for marker in HANDOFF_MARKERS)
+
+        # I-4：转人工时自动入队待接管（用 token 作唯一 key，幂等）
+        if self._chat_handoff:
+            record_handoff(
+                session_id=token,
+                user_ip=self._client_ip(),
+                last_reply=reply_text,
+                messages=[
+                    {"role": "user",      "text": message,    "ts": time.time()},
+                    {"role": "assistant", "text": reply_text, "ts": time.time()},
+                ],
+            )
 
         # P2-4：记录完整回复与输出 token，供成本日志与 FAQ 缓存使用
         self._chat_reply = reply_text

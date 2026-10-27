@@ -94,7 +94,7 @@ ecommerce-ai-customer-service/
 │   ├── product-catalog.md      # 商品目录与价格表（20款）
 │   ├── chatflow-design.md      # 六路条件判断对话流设计
 │   ├── test-cases.md           # 测试用例设计（25 组设计 + 5 条边界补充 = 30 条执行）
-│   ├── release-checklist.md    # 上线检查清单（发布前 10 项 + 发布后自检 + 事故对照）
+│   ├── release-checklist.md    # 上线检查清单 + 应急 Runbook（发布 10 项 / 故障分级 / 场景处置 / 回滚 SOP）
 │   └── integration-plan-v2.md  # v2.0 对接真实店铺方案（物流/人工/知识库同步）
 └── README.md
 ```
@@ -201,7 +201,7 @@ GitHub Pages 只能托管静态文件，跑不了后端，所以**真实对话�
 
 改动对话流、提示词、知识库或后端代码后，按 [`docs/release-checklist.md`](docs/release-checklist.md) 逐条勾选：
 工作流已发布 / 智能体已发布 / API 渠道勾选 / 令牌真的可用 / 单轮与多轮评测通过 / 额度充足 / 密钥未进仓库 / 版本号与文档已更新 / 回滚点已记。
-清单里还附了发布后 4 条自检命令和「现象 → 原因 → 处理」对照表。
+清单里还附了发布后 4 条自检命令和「现象 → 原因 → 处理」对照表。文档同时兼作**应急 Runbook**：按 P0–P3 分级、7 个故障场景的逐层判定顺序、Render 与扣子两侧的回滚 SOP、诊断命令速查。
 
 ### GitHub Pages 静态演示仍然有效
 

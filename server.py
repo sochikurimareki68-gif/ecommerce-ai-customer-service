@@ -101,6 +101,8 @@ COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "").strip().lower() in ("1", "tr
 EXTRA_ORIGINS = [
     o.strip().rstrip("/") for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
+# I-2：进程启动时间戳，/api/health 的 uptime 字段（秒）由此计算，配合定时探活证明服务持续在线
+_PROCESS_START = time.time()
 
 
 class RateLimiter:
@@ -479,7 +481,7 @@ def _hash_for_log(value: str) -> str:
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "YoumianProxy/1.13"   # 与项目当前版本对齐，方便线上排查
+    server_version = "YoumianProxy/1.14"   # 与项目当前版本对齐，方便线上排查
 
     # 本请求需要下发的 Set-Cookie（新建会话时才会设置）
     _pending_cookie = ""
@@ -584,6 +586,7 @@ class Handler(BaseHTTPRequestHandler):
                 "token_ready": bool(COZE_API_TOKEN),
                 "max_message_chars": MAX_MESSAGE_CHARS,
                 "version": self.server_version,
+                "uptime": round(time.time() - _PROCESS_START, 1),   # I-2：进程存活秒数，探活后可证明服务持续在线
             })
             return
         # I-4：人工接管轻量版 API（只读，无鉴权；demo 阶段面试时说"下一步加 token"）

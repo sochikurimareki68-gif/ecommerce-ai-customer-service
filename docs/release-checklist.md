@@ -73,6 +73,7 @@ curl -sN -X POST https://youmian-customer-service.onrender.com/api/chat \
 | 2026-10-25 | v2.0.3 文档 | 全量回归 + 指标口径修正（分支归属降级为参考） | 覆盖 100%、规范 100%、事实 12/12、安全 6/6 | 上一版文档 |
 | 2026-10-27 | 意图抽检 | 20 条人工抽检回填报告 | 意图正确率 20/20 = 100% | — |
 | 2026-10-27 | I-3/I-4/I-5 | 挂件化、人工接管轻量版、二维码扫码 | 本地三页面联调通过 | 0544d12 |
+| 2026-10-28 | I-2 探活 | GitHub Actions 每 5 分钟 curl /api/health 防免费实例休眠；/api/health 新增 uptime 字段；server_version 1.13→1.14 | 本地单测 45 条全绿；首次 workflow 触发后看 Actions 页确认 | 删除 `.github/workflows/keepalive.yml` 即可关闭 |
 
 ---
 

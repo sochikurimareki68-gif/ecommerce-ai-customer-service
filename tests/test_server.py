@@ -462,6 +462,15 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertTrue(data["ok"])
         self.assertIn("max_message_chars", data)
 
+    def test_health_reports_uptime(self):
+        """I-2：health 返回 uptime（进程存活秒数），配合定时探活证明服务在线。"""
+        status, body = self._request("GET", "/api/health")
+        data = json.loads(body)
+        self.assertEqual(status, 200)
+        self.assertIn("uptime", data)
+        self.assertIsInstance(data["uptime"], (int, float))
+        self.assertGreaterEqual(data["uptime"], 0.0)
+
     def test_health_is_rate_limited_per_ip(self):
         server.HEALTH_LIMITER._hits.clear()
         try:

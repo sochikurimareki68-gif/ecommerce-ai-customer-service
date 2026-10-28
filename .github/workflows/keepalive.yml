@@ -1,0 +1,38 @@
+# I-2 消除冷启动：Render 免费实例 15 分钟无入站流量即休眠，
+# 面试官点开链接最坏要等 30-60s 白屏。用 GitHub Actions 定时探活保持常醒。
+#
+# 为什么是每 5 分钟而不是 10：GitHub 定时任务在高峰期会延迟数分钟才触发，
+# 10 分钟间隔一旦延迟就撞上 15 分钟休眠线；5 分钟留足冗余。
+# 本仓库为公开仓库，Actions 分钟数免费。
+#
+# 注意（GitHub 官方行为）：
+#   - 仓库 60 天无 push 时，定时任务会被自动停用（本仓库在持续迭代，无此风险）
+#   - 定时任务只在默认分支（main）上生效
+#
+# 面试前手动预热：Actions → Keepalive → Run workflow，或本地直接
+#   curl https://youmian-customer-service.onrender.com/api/health
+#
+# 回滚：删除本文件即可（服务功能不受影响）。
+
+name: Keepalive
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # UTC，每 5 分钟
+  workflow_dispatch: {}      # 支持手动触发，便于验证与预热
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 探活 /api/health
+        run: |
+          set -e
+          # 若实例已休眠，首个请求需 30-60s 唤醒，超时给足 180s
+          code=$(curl -sS -o /tmp/health.json -w "%{http_code}" --max-time 180 \
+            "https://youmian-customer-service.onrender.com/api/health")
+          echo "HTTP $code"
+          cat /tmp/health.json
+          echo
+          test "$code" = "200"
+          grep -q '"ok": *true' /tmp/health.json

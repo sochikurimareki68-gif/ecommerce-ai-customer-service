@@ -372,10 +372,11 @@ function renderDetail(data) {
   }).join("");
   const sidShort = escapeHtml(data.session_id_short || data.session_id.slice(0, 12));
   const sidFull = escapeHtml(data.session_id);
+  const rounds = Number(data.context_rounds) || Math.ceil(data.messages.length / 2);
 
   document.getElementById("detail").innerHTML = `
     <div class="detail-header">
-      <h2>完整对话 <span class="sid">session_id: ${sidShort}…</span></h2>
+      <h2>最近 ${escapeHtml(String(rounds))} 轮对话 <span class="sid">session_id: ${sidShort}…</span></h2>
       <div class="actions">
         <button class="ghost" onclick="selectItem('${sidFull}')">🔄 刷新详情</button>
         <button onclick="resolve('${sidFull}')">✅ 标记已处理</button>

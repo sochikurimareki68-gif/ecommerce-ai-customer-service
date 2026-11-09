@@ -148,6 +148,7 @@ open http://localhost:3000       # macOS
 | `ALLOWED_ORIGINS` | （空） | 额外允许的来源域名，逗号分隔 |
 | `COZE_CA_BUNDLE` | （空） | 自定义 CA 证书路径；本地证书校验失败（certificate verify failed）时手动指定 |
 | `COOKIE_SECURE` | （空） | 强制给会话 Cookie 加 `Secure`（`1`/`true`/`yes`）；留空则按请求的 `X-Forwarded-Proto` 自动判断（HTTPS 部署自动加，本地不加） |
+| `HANDOFF_CONTEXT_ROUNDS` | `5` | 转人工时随接管队列保留的上下文轮数（最近 N 组问答） |
 
 ## 部署到公网（让别人能访问）
 

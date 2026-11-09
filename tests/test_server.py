@@ -59,6 +59,18 @@ class FakeSse:
         self.events.append((event, data))
 
 
+class FakeJsonHandler:
+    """只保留 _send_json 的假 Handler，用来直接测管理接口的处理器。"""
+
+    def __init__(self):
+        self.status = None
+        self.payload = None
+
+    def _send_json(self, status, obj):
+        self.status = status
+        self.payload = obj
+
+
 def _sse_lines(*events):
     """把 (event, data) 组装成扣子风格的 SSE 行。"""
     out = []
@@ -259,6 +271,91 @@ class SessionStoreTest(unittest.TestCase):
                     store.resolve("")
         self.assertLessEqual(len(store._data), 2)
 
+    def test_new_session_starts_at_zero_turns(self):
+        """首问判定看 turn_count，不看 epoch。"""
+        store = server.SessionStore()
+        token, _, _, _ = store.resolve("")
+        self.assertEqual(store.turn_count(token), 0)
+
+    def test_record_turn_increments_turn_count(self):
+        store = server.SessionStore()
+        token, _, _, _ = store.resolve("")
+        store.record_turn(token, "你好", "您好", store.epoch(token))
+        self.assertEqual(store.turn_count(token), 1)
+
+    def test_reset_clears_turn_count_and_history(self):
+        """点过「清空对话」后要重新算首问，否则 FAQ 缓存永远不再命中。"""
+        store = server.SessionStore()
+        token, _, _, _ = store.resolve("")
+        store.record_turn(token, "你好", "您好")
+        store.reset(token)
+        self.assertEqual(store.turn_count(token), 0)
+        self.assertEqual(store.history(token), [])
+
+    def test_stale_epoch_turn_is_discarded(self):
+        """清空后在途请求晚到的问答不能写进新世代。"""
+        store = server.SessionStore()
+        token, _, _, _ = store.resolve("")
+        stale = store.epoch(token)
+        store.reset(token)
+        store.record_turn(token, "旧问题", "旧回答", stale)
+        self.assertEqual(store.turn_count(token), 0)
+        self.assertEqual(store.history(token), [])
+
+    def test_history_keeps_only_latest_rounds(self):
+        store = server.SessionStore()
+        token, _, _, _ = store.resolve("")
+        total = server.HANDOFF_CONTEXT_ROUNDS + 2
+        for i in range(total):
+            store.record_turn(token, f"问{i}", f"答{i}")
+        history = store.history(token)
+        self.assertEqual(len(history), server.HISTORY_MAX_MESSAGES)
+        # 保留的是最后 N 轮，最早的两轮应被丢弃
+        self.assertEqual(history[0]["text"], "问2")
+        self.assertEqual(history[-2]["text"], f"问{total - 1}")
+        self.assertEqual(history[-1]["text"], f"答{total - 1}")
+
+
+# ----------------------------------------------------------------------
+# I-4 人工接管：入队时带上最近若干轮上下文
+# ----------------------------------------------------------------------
+class HandoffContextTest(unittest.TestCase):
+    def tearDown(self):
+        with server.PENDING_HANDOFF_LOCK:
+            server.PENDING_HANDOFF.clear()
+
+    def _prepare(self):
+        store = server.SessionStore()
+        token, _, _, _ = store.resolve("")
+        store.record_turn(token, "四件套是什么面料", "这款是纯棉的")
+        store.record_turn(token, "那会缩水吗", "正在为您转接人工客服")
+        server.record_handoff(token, "9.9.9.9", "正在为您转接人工客服", store.history(token))
+        return token
+
+    def test_handoff_keeps_previous_rounds(self):
+        token = self._prepare()
+        entry = server.PENDING_HANDOFF[token]
+        self.assertEqual(
+            [m["text"] for m in entry["messages"]],
+            ["四件套是什么面料", "这款是纯棉的", "那会缩水吗", "正在为您转接人工客服"],
+        )
+
+    def test_pending_list_previews_latest_user_message(self):
+        """列表预览不能取历史里最早那句，要取触发转人工的这一句。"""
+        self._prepare()
+        fake = FakeJsonHandler()
+        server.Handler._handle_pending_list(fake)
+        item = fake.payload["items"][0]
+        self.assertEqual(item["last_user"], "那会缩水吗")
+        self.assertEqual(item["msg_count"], 4)
+
+    def test_pending_detail_reports_context_rounds(self):
+        token = self._prepare()
+        fake = FakeJsonHandler()
+        server.Handler._handle_pending_detail(fake, token)
+        self.assertEqual(fake.payload["context_rounds"], server.HANDOFF_CONTEXT_ROUNDS)
+        self.assertEqual(len(fake.payload["messages"]), 4)
+
 
 # ----------------------------------------------------------------------
 # Handler 小工具
@@ -289,6 +386,29 @@ class HandlerHelpersTest(unittest.TestCase):
         handler = FakeHandler({"Cookie": "a=1; ym_session=abc123; b=2"})
         self.assertEqual(server.Handler._read_cookie(handler, "ym_session"), "abc123")
         self.assertEqual(server.Handler._read_cookie(handler, "missing"), "")
+
+    def test_session_cookie_is_lax_on_local_http(self):
+        """本地 HTTP 调试不能加 Secure，只能保持 SameSite=Lax。"""
+        handler = FakeHandler({})
+        with mock.patch.object(server, "COOKIE_SECURE", False):
+            cookie = server.Handler._session_cookie(handler, "tok")
+        self.assertIn("SameSite=Lax", cookie)
+        self.assertNotIn("Secure", cookie)
+
+    def test_session_cookie_is_none_secure_behind_https(self):
+        """HTTPS 下挂件 iframe 跨站，Cookie 必须是 SameSite=None; Secure。"""
+        handler = FakeHandler({"X-Forwarded-Proto": "https"})
+        with mock.patch.object(server, "COOKIE_SECURE", False):
+            cookie = server.Handler._session_cookie(handler, "tok")
+        self.assertIn("SameSite=None", cookie)
+        self.assertIn("Secure", cookie)
+
+    def test_session_cookie_forced_secure_by_env(self):
+        handler = FakeHandler({})
+        with mock.patch.object(server, "COOKIE_SECURE", True):
+            cookie = server.Handler._session_cookie(handler, "tok")
+        self.assertIn("SameSite=None", cookie)
+        self.assertIn("Secure", cookie)
 
     def test_client_ip_prefers_forwarded(self):
         handler = FakeHandler({"X-Forwarded-For": "1.2.3.4, 5.6.7.8"})

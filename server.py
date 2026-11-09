@@ -93,7 +93,8 @@ COZE_IN_PRICE = float(os.environ.get("COZE_IN_PRICE", "0.0008"))
 COZE_OUT_PRICE = float(os.environ.get("COZE_OUT_PRICE", "0.002"))
 # 扣子系统提示词的固定 token 开销估算（助手快照注入后，模型实际输入还含 bot 自带 prompt）
 PROMPT_OVERHEAD_TOK = int(os.environ.get("PROMPT_OVERHEAD_TOK", "300"))
-# P2-4 FAQ 缓存：只缓存会话首问（epoch==0），相同问题直接回放，省一次模型调用。TTL 1 小时，最多 200 条。
+# P2-4 FAQ 缓存：只缓存会话首问（turn_count==0），相同问题直接回放，省一次模型调用。TTL 1 小时，最多 200 条。
+# 首问判定用轮次而不是 epoch：epoch 在 reset 后会持续 +1，用它判首问会导致「清空对话」后再也不命中缓存。
 FAQ_CACHE_TTL = int(os.environ.get("FAQ_CACHE_TTL", "3600"))
 FAQ_CACHE_MAX = int(os.environ.get("FAQ_CACHE_MAX", "200"))
 # 会话 Cookie 是否强制加 Secure；留空则按请求的 X-Forwarded-Proto 自动判断（HTTPS 部署加，本地不加）
@@ -101,6 +102,10 @@ COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "").strip().lower() in ("1", "tr
 # 人工接管接口（/api/pending、/api/session/*、/api/resolve）的管理口令。
 # 未配置时默认「全部拒绝」——宁可接管页打不开，也不能让待接管对话在公网裸奔。
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
+# I-4 人工接管：转人工时连同最近 N 轮上下文一起入队，人工接手时能看到前因后果。
+# 5 轮 = 最近 5 组「用户提问 + 助手回复」；超出自动丢弃，避免内存膨胀。
+HANDOFF_CONTEXT_ROUNDS = max(1, int(os.environ.get("HANDOFF_CONTEXT_ROUNDS", "5")))
+HISTORY_MAX_MESSAGES = HANDOFF_CONTEXT_ROUNDS * 2
 EXTRA_ORIGINS = [
     o.strip().rstrip("/") for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
@@ -242,6 +247,8 @@ class SessionStore:
                     "user_id": f"web_{token[:12]}",   # 由服务端生成，客户端无法指定
                     "conversation_id": "",
                     "epoch": 0,                       # 会话世代：reset 后 +1，用于丢弃在途请求的晚到结果
+                    "turn_count": 0,                  # 已完成轮次：判定会话首问（FAQ 缓存），reset 清零
+                    "history": [],                    # 最近若干轮问答：转人工时随队列交给人工
                     "slots": {},                      # M-2 槽位：跨轮记住订单尾号/床型等关键信息
                     "seen": time.time(),
                 }
@@ -257,6 +264,8 @@ class SessionStore:
                 return 0
             session["epoch"] = session.get("epoch", 0) + 1
             session["conversation_id"] = ""
+            session["turn_count"] = 0                 # 清空对话 = 重新算首问，缓存可再次命中
+            session["history"] = []                   # 旧上下文一并清掉
             session["slots"] = {}                     # 清空会话时槽位一并清掉（M-2）
             session["seen"] = time.time()
             return session["epoch"]
@@ -265,6 +274,42 @@ class SessionStore:
         with self._lock:
             session = self._data.get(token)
             return session.get("epoch", 0) if session else 0
+
+    def turn_count(self, token: str) -> int:
+        """已完成轮次数。0 表示这是会话首问（reset 后会重新归零）。"""
+        with self._lock:
+            session = self._data.get(token)
+            return int(session.get("turn_count", 0)) if session else 0
+
+    def record_turn(self, token: str, user_text: str, reply_text: str,
+                    epoch: int | None = None) -> None:
+        """记录一轮完整问答：轮次 +1，并把最近若干轮留在会话里。
+
+        世代对不上（用户中途点了「清空」）说明这轮属于旧会话，整轮丢弃，
+        避免旧上下文污染新世代；空文本一侧不入历史，但轮次照常累加。
+        """
+        with self._lock:
+            session = self._data.get(token)
+            if not session:
+                return
+            if epoch is not None and session.get("epoch", 0) != epoch:
+                return
+            session["turn_count"] = session.get("turn_count", 0) + 1
+            history = session.setdefault("history", [])
+            now = time.time()
+            for role, text in (("user", user_text), ("assistant", reply_text)):
+                if text:
+                    history.append({"role": role, "text": text, "ts": now})
+            if len(history) > HISTORY_MAX_MESSAGES:
+                del history[:-HISTORY_MAX_MESSAGES]
+
+    def history(self, token: str) -> list[dict]:
+        """返回最近若干轮问答的副本（最多 HISTORY_MAX_MESSAGES 条）。"""
+        with self._lock:
+            session = self._data.get(token)
+            if not session:
+                return []
+            return [dict(m) for m in session.get("history", [])]
 
     def set_conversation(self, token: str, conversation_id: str, epoch: int | None = None) -> None:
         with self._lock:
@@ -447,7 +492,7 @@ def faq_cache_put(key: str, reply: str, branch: str) -> None:
 # 数据结构：pending_handoff[session_id] = {
 #     "ts": 入队时间戳,
 #     "user_ip_hash": IP 短哈希（脱敏）,
-#     "messages": [{"role": "user"/"assistant", "text": "...", "ts": ...}, ...],
+#     "messages": 最近 HANDOFF_CONTEXT_ROUNDS 轮的问答（含触发转人工的这一轮）,
 #     "last_reply": 转接话术原文,
 #     "resolved": False,
 # }
@@ -561,9 +606,13 @@ class Handler(BaseHTTPRequestHandler):
         return ""
 
     def _session_cookie(self, token: str) -> str:
-        cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={SESSION_TTL}"
-        # HTTPS 部署下加 Secure（含反向代理场景）；本地 HTTP 不加，COOKIE_SECURE 强制开启
-        if COOKIE_SECURE or self.headers.get("X-Forwarded-Proto") == "https":
+        # HTTPS 部署（含反向代理）用 SameSite=None + Secure：挂件以 iframe 嵌在别的站点时，
+        # Cookie 属于跨站上下文，Lax 会被浏览器丢弃，导致嵌入版多轮记忆失效。
+        # 本地 HTTP 调试没法用 Secure，只能保持 Lax（同站页面不受影响）。
+        secure = COOKIE_SECURE or self.headers.get("X-Forwarded-Proto") == "https"
+        same_site = "None" if secure else "Lax"
+        cookie = f"{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite={same_site}; Max-Age={SESSION_TTL}"
+        if secure:
             cookie += "; Secure"
         return cookie
 
@@ -713,6 +762,12 @@ class Handler(BaseHTTPRequestHandler):
             for sid, entry in PENDING_HANDOFF.items():
                 if entry.get("resolved"):
                     continue
+                # 历史里可能保留多轮，列表预览要取「最后一条用户消息」（即触发转人工的那句）
+                last_user = ""
+                for m in reversed(entry["messages"]):
+                    if m["role"] == "user":
+                        last_user = m["text"]
+                        break
                 items.append({
                     # 管理接口已鉴权，列表直接给完整 session_id，详情/标记按完整值精确匹配。
                     # 前端展示时再截前 12 位，避免界面上铺满长 token。
@@ -721,7 +776,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ts": entry["ts"],
                     "time_str": datetime.fromtimestamp(entry["ts"]).strftime("%H:%M:%S"),
                     "user_ip_hash": entry["user_ip_hash"],
-                    "last_user": entry["messages"][0]["text"][:40] if entry["messages"] else "",
+                    "last_user": last_user[:40],
                     "last_reply_preview": entry["last_reply"][:60],
                     "msg_count": len(entry["messages"]),
                 })
@@ -756,6 +811,7 @@ class Handler(BaseHTTPRequestHandler):
                 "time_str": datetime.fromtimestamp(entry["ts"]).strftime("%Y-%m-%d %H:%M:%S"),
                 "user_ip_hash": entry["user_ip_hash"],
                 "resolved": entry.get("resolved", False),
+                "context_rounds": HANDOFF_CONTEXT_ROUNDS,
                 "messages": [
                     {
                         "role": m["role"],
@@ -842,6 +898,8 @@ class Handler(BaseHTTPRequestHandler):
         # 每次都下发 cookie —— 会话有效时相当于刷新有效期，用户持续使用就不会掉线。
         token, user_id, conversation_id, _ = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
         epoch = SESSIONS.epoch(token)          # 记录本轮所处的会话世代
+        # 首问判定用会话轮次：reset 会把 turn_count 清零，点过「清空对话」后仍能重新命中缓存
+        first_turn = SESSIONS.turn_count(token) == 0
         self._pending_cookie = self._session_cookie(token)
 
         # M-2：先从本条消息抽槽位、合并进会话，再把完整槽位以一条助手快照
@@ -858,10 +916,10 @@ class Handler(BaseHTTPRequestHandler):
         self._chat_out_tok = 0
         resp = None  # 提前初始化，保证 finally 里 resp.close() 在缓存命中路径不报错
 
-        # P2-4 FAQ 缓存：只缓存会话首问（epoch==0），相同问题直接回放，不调用模型。
+        # P2-4 FAQ 缓存：只缓存会话首问（first_turn），相同问题直接回放，不调用模型。
         # 归一化 key：去空格转小写，避免「四件套尺寸」和「四件套 尺寸」存两份。
         cache_key = re.sub(r"\s+", "", message).lower()
-        if epoch == 0:
+        if first_turn:
             cached = faq_cache_get(cache_key)
             if cached is not None:
                 cached_reply, cached_branch = cached
@@ -870,6 +928,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._chat_reply = cached_reply
                 self._chat_out_tok = estimate_tokens(cached_reply)
                 self._chat_cache_hit = True
+                SESSIONS.record_turn(token, message, cached_reply, epoch)
                 self._sse_start()
                 self._sse_send("delta", json.dumps({"content": cached_reply}, ensure_ascii=False))
                 if cached_branch:
@@ -943,7 +1002,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             self._pump_stream(resp, token, epoch, message)
             # P2-4 FAQ 缓存：首问且成功拿到非空回复、且未转人工时写入缓存，下次同问题直接回放。
-            if epoch == 0 and self._chat_reply and not self._chat_handoff:
+            if first_turn and self._chat_reply and not self._chat_handoff:
                 faq_cache_put(cache_key, self._chat_reply, self._chat_branch)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             pass  # 用户中途关掉页面，正常情况
@@ -1076,16 +1135,16 @@ class Handler(BaseHTTPRequestHandler):
         # 是否转人工单独按回复里的转接话术判定，供日志统计与 FAQ 缓存排除
         self._chat_handoff = any(marker in reply_text for marker in HANDOFF_MARKERS)
 
+        # 先把本轮的问答写进会话（轮次 + 最近若干轮历史），转人工时连同上下文一起入队
+        SESSIONS.record_turn(token, message, reply_text, epoch)
+
         # I-4：转人工时自动入队待接管（用 token 作唯一 key，幂等）
         if self._chat_handoff:
             record_handoff(
                 session_id=token,
                 user_ip=self._client_ip(),
                 last_reply=reply_text,
-                messages=[
-                    {"role": "user",      "text": message,    "ts": time.time()},
-                    {"role": "assistant", "text": reply_text, "ts": time.time()},
-                ],
+                messages=SESSIONS.history(token),
             )
 
         # P2-4：记录完整回复与输出 token，供成本日志与 FAQ 缓存使用

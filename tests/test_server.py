@@ -745,5 +745,23 @@ class QRCodePageTest(unittest.TestCase):
         self.assertIn("document.createElement('a')", self.html)
 
 
+class HandoffStatusPageTest(unittest.TestCase):
+    """转人工后右上角徽标必须同步变化，不能和聊天区提示互相矛盾。"""
+
+    @classmethod
+    def setUpClass(cls):
+        path = Path(__file__).resolve().parents[1] / "index.html"
+        cls.html = path.read_text(encoding="utf-8")
+
+    def test_status_badge_tracks_handoff_and_resets(self):
+        self.assertIn(".status-pill.is-handoff", self.html)
+        self.assertIn("statusText.textContent = '等待人工接入'", self.html)
+        # 收到 handoff 事件时置位并立即重绘徽标
+        self.assertIn("handoffActive = true", self.html)
+        # 清空对话时复位，徽标回到「在线」
+        self.assertIn("handoffActive = false", self.html)
+        self.assertIn("renderStatusPill();", self.html)
+
+
 if __name__ == "__main__":
     unittest.main()

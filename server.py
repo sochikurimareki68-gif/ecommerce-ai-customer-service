@@ -363,6 +363,13 @@ class SessionStore:
             if not session.get("handoff"):
                 session["handoff"] = {"ticket": ticket, "since": time.time()}
 
+    def clear_handoff(self, token: str) -> None:
+        """仅清掉转人工标记（工单已处理完时用），不影响历史与轮次。"""
+        with self._lock:
+            session = self._data.get(token)
+            if session:
+                session["handoff"] = None
+
     def append_user_message(self, token: str, text: str,
                             epoch: int | None = None) -> bool:
         """转人工后把用户消息记进会话历史（不增加轮次，不参与 FAQ 缓存）。"""
@@ -860,6 +867,15 @@ class Handler(BaseHTTPRequestHandler):
             self._reject(403, "请求来源不被允许")
             return
 
+        # 读掉请求体：本接口不看 body，但不读会让 keep-alive 连接上残留字节，
+        # 污染下一个请求（表现为 501 Unsupported method）。
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        if 0 < length <= MAX_BODY_BYTES:
+            self.rfile.read(length)
+
         token, _, _, _ = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
         epoch = SESSIONS.reset(token)
         # 方案 B：清空对话 = 结束本次转人工，工单一并撤下，后续正常问答恢复调模型
@@ -1010,19 +1026,31 @@ class Handler(BaseHTTPRequestHandler):
         self._emit_chat_log(token, message)
 
     def _handle_handoff_state(self) -> None:
-        """刷新页面后恢复转人工状态（只读 cookie，不创建新会话）。"""
+        """刷新页面后恢复会话：转人工状态 + 最近对话历史。
+
+        只读 cookie，绝不创建会话、绝不入队：刷新本身不能产生新工单。
+        若会话里还留着 handoff 但队列里已没有对应的活动工单（人工已处理完 /
+        已被撤下），说明这条转人工已经结束——不能对外宣称「等待人工接入」，
+        同时清掉会话状态，恢复正常问答，避免刷新出现没有来源的幽灵提示。
+        """
         token = self._read_cookie(SESSION_COOKIE)
+        messages = SESSIONS.history(token) if token else []
         state = SESSIONS.handoff(token) if token else None
         if not state:
-            self._send_json(200, {"handoff": False})
+            self._send_json(200, {"handoff": False, "messages": messages})
             return
-        self._pending_cookie = self._session_cookie(token)
         with PENDING_HANDOFF_LOCK:
             position = _handoff_position_locked(token)
+        if position <= 0:
+            SESSIONS.clear_handoff(token)
+            self._send_json(200, {"handoff": False, "messages": messages})
+            return
+        self._pending_cookie = self._session_cookie(token)
         self._send_json(200, {
             "handoff": True,
             "ticket": state.get("ticket", ""),
             "queue_position": position,
+            "messages": messages,
         })
 
     def _handle_chat(self) -> None:

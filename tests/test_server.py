@@ -426,6 +426,58 @@ class HandoffContextTest(unittest.TestCase):
         self.assertEqual(fake.payload["ticket"], token[:12])
         self.assertEqual(fake.payload["queue_position"], 1)
 
+    def test_repeat_refresh_keeps_ticket_and_history_without_new_handoff(self):
+        """刷新恢复必须幂等：工单号不变、队列不增加、历史照常返回。"""
+        store = server.SessionStore()
+        token, _, _, _ = store.resolve("")
+        store.record_turn(token, "转人工", "亲~马上为您转接人工客服")
+        server.record_handoff(token, "9.9.9.9", "亲~马上为您转接人工客服",
+                              store.history(token))
+        store.enter_handoff(token, token[:12])
+        payloads = []
+        with mock.patch.object(server, "SESSIONS", store):
+            for _ in range(3):
+                fake = FakeJsonHandler()
+                fake._read_cookie = lambda name: token
+                fake._session_cookie = lambda t: ""
+                server.Handler._handle_handoff_state(fake)
+                payloads.append(fake.payload)
+        self.assertTrue(all(p["handoff"] for p in payloads))
+        self.assertEqual({p["ticket"] for p in payloads}, {token[:12]})
+        self.assertEqual(len(server.PENDING_HANDOFF), 1)
+        self.assertEqual([m["text"] for m in payloads[-1]["messages"]],
+                         ["转人工", "亲~马上为您转接人工客服"])
+
+    def test_handoff_state_without_active_ticket_is_cleared(self):
+        """工单已处理（队列里没有活动工单）时不能再报「等待人工接入」。"""
+        store = server.SessionStore()
+        token, _, _, _ = store.resolve("")
+        store.record_turn(token, "转人工", "亲~马上为您转接人工客服")
+        server.record_handoff(token, "9.9.9.9", "亲~马上为您转接人工客服", [])
+        store.enter_handoff(token, token[:12])
+        with server.PENDING_HANDOFF_LOCK:
+            server.PENDING_HANDOFF[token]["resolved"] = True
+        with mock.patch.object(server, "SESSIONS", store):
+            fake = FakeJsonHandler()
+            fake._read_cookie = lambda name: token
+            fake._session_cookie = lambda t: ""
+            server.Handler._handle_handoff_state(fake)
+        self.assertFalse(fake.payload["handoff"])
+        self.assertIsNone(store.handoff(token))       # 幽灵状态被清掉
+        self.assertEqual(len(fake.payload["messages"]), 2)
+
+    def test_handoff_state_never_creates_session_or_ticket(self):
+        """全新浏览器打开页面（无 cookie）不能建会话、建单。"""
+        store = server.SessionStore()
+        with mock.patch.object(server, "SESSIONS", store):
+            fake = FakeJsonHandler()
+            fake._read_cookie = lambda name: ""
+            fake._session_cookie = lambda t: ""
+            server.Handler._handle_handoff_state(fake)
+        self.assertEqual(fake.payload, {"handoff": False, "messages": []})
+        self.assertEqual(len(store._data), 0)
+        self.assertEqual(len(server.PENDING_HANDOFF), 0)
+
 
 # ----------------------------------------------------------------------
 # Handler 小工具
@@ -838,6 +890,16 @@ class HandoffStatusPageTest(unittest.TestCase):
         self.assertIn("!errored && !delivered", self.html)
         self.assertIn("/api/handoff", self.html)
         self.assertIn("restoreHandoffState();", self.html)
+
+    def test_refresh_restores_history_without_posting(self):
+        """刷新恢复走 GET /api/handoff 并回填历史，不能借恢复流程再发消息建单。"""
+        self.assertIn("renderHistory(data.messages || [])", self.html)
+        self.assertIn("function renderHistory(messages)", self.html)
+        self.assertIn("let historyRendered = false;", self.html)
+        self.assertIn("addMessageAt(text, m.role === 'assistant' ? 'bot' : 'user', m.ts)", self.html)
+        # 恢复函数里不能有写请求（POST），刷新本身绝不能建单
+        restore_block = self.html.split("async function restoreHandoffState()")[1].split("function showTyping")[0]
+        self.assertNotIn("POST", restore_block)
 
 
 if __name__ == "__main__":

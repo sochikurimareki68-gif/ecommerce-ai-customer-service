@@ -1292,12 +1292,52 @@
     scrollToBottom(false);
   }
 
-  // 刷新页面后从服务端恢复转人工状态（状态存在 SessionStore，不只靠前端）
+  // 刷新后按服务端会话历史重建聊天区（同一 cookie 下），避免刷新只剩欢迎语
+  let historyRendered = false;
+  function formatClock(ts) {
+    const d = ts ? new Date(ts * 1000) : new Date();
+    if (isNaN(d.getTime())) return getTime();
+    return d.toLocaleTimeString('zh-CN', { hour12: false });
+  }
+  function addMessageAt(text, sender, ts) {
+    const stick = isNearBottom();
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message ' + sender;
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    bubble.textContent = text;
+    const time = document.createElement('div');
+    time.className = 'time';
+    time.textContent = formatClock(ts);
+    msgDiv.appendChild(bubble);
+    msgDiv.appendChild(time);
+    msgBox.appendChild(msgDiv);
+    if (stick) scrollToBottom(false);
+  }
+  function renderHistory(messages) {
+    if (historyRendered) return;
+    if (!Array.isArray(messages) || !messages.length) return;
+    // 用户已经开始新对话（聊天区不止欢迎语）时不再插入，避免重复渲染
+    if (msgBox.querySelectorAll('.message').length > 1) {
+      historyRendered = true;
+      return;
+    }
+    historyRendered = true;
+    messages.forEach(function (m) {
+      const text = (m && m.text) || '';
+      if (!text) return;
+      addMessageAt(text, m.role === 'assistant' ? 'bot' : 'user', m.ts);
+    });
+    scrollToBottom(false);
+  }
+
+  // 刷新页面后从服务端恢复会话：历史消息 + 转人工状态（状态存在 SessionStore，不只靠前端）
   async function restoreHandoffState() {
     try {
       const res = await fetch('/api/handoff', { credentials: 'same-origin', cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
+      renderHistory(data.messages || []);
       if (!data.handoff) return;
       showHandoffNotice(data.ticket || '', data.queue_position || 0);
     } catch (e) {

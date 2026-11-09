@@ -71,7 +71,11 @@
   }
 
   main {
-    flex: 1; display: grid; grid-template-columns: 380px 1fr;
+    flex: 1; display: grid; grid-template-columns: 380px minmax(0, 1fr);
+    /* 行高必须锁死在 main 的可用高度内：默认的 auto 行会被内容撑开，
+       子项的 overflow-y:auto 就永远不触发，滚动条不出现。 */
+    grid-template-rows: minmax(0, 1fr);
+    min-height: 0;      /* body 是列向 flex，main 默认 min-height:auto 会被内容顶高 */
     overflow: hidden;
   }
 
@@ -79,6 +83,7 @@
   .queue {
     background: var(--paper); border-right: 1px solid var(--ink-5);
     overflow-y: auto;
+    min-height: 0;      /* 网格项默认 min-height:auto，会撑到内容高度 */
   }
   .queue::-webkit-scrollbar { width: 6px; }
   .queue::-webkit-scrollbar-thumb { background: var(--ink-5); border-radius: 3px; }
@@ -133,8 +138,11 @@
   .detail {
     display: flex; flex-direction: column;
     background: var(--sand);
+    min-height: 0;      /* 同上：网格项要能收缩，内部 chat-flow 才能出滚动条 */
+    overflow: hidden;
   }
   .detail-header {
+    flex: 0 0 auto;     /* 头部/底部固定，不参与压缩 */
     background: var(--paper); border-bottom: 1px solid var(--ink-5);
     padding: 14px 28px; display: flex; justify-content: space-between; align-items: center;
   }
@@ -153,7 +161,8 @@
   }
 
   .chat-flow {
-    flex: 1; overflow-y: auto; padding: 28px;
+    flex: 1 1 auto; overflow-y: auto; padding: 28px;
+    min-height: 0;      /* flex 子项默认 min-height:auto，会撑开而不滚动 */
     background: var(--sand);
   }
   .chat-flow::-webkit-scrollbar { width: 6px; }
@@ -212,6 +221,18 @@
     padding: 10px 28px; font-size: 11px; color: var(--ink-4);
     background: var(--paper); border-top: 1px solid var(--ink-5);
     display: flex; gap: 16px;
+    flex: 0 0 auto;
+  }
+
+  /* 窄窗口：左右改上下堆叠，两块区域仍各自独立滚动 */
+  @media (max-width: 900px) {
+    main {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: minmax(0, 34%) minmax(0, 1fr);
+    }
+    .queue { border-right: none; border-bottom: 1px solid var(--ink-5); }
+    .detail-header { flex-wrap: wrap; gap: 8px; padding: 10px 16px; }
+    .chat-flow { padding: 18px 16px; }
   }
 
   footer {
@@ -451,7 +472,7 @@ function renderDetail(data) {
       </div>
     </div>
     <div class="chat-flow">${msgs}</div>
-    <div style="padding:8px 24px;font-size:11px;color:#a8a59e;border-top:1px solid #e8e0d1;background:#fff;">
+    <div style="flex:0 0 auto;padding:8px 24px;font-size:11px;color:#a8a59e;border-top:1px solid #e8e0d1;background:#fff;">
       入队时间 ${escapeHtml(data.time_str)} · 用户 IP 哈希 ${escapeHtml(data.user_ip_hash)} · 轻量版只读，无法在此回复用户
     </div>
   `;

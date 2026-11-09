@@ -780,6 +780,20 @@ class TakeoverPageTest(unittest.TestCase):
         self.assertIn('new AdminError("network"', self.html)
         self.assertNotIn("请确认 server.py 正在运行", self.html)
 
+    def test_scroll_containers_are_height_constrained(self):
+        """左右两栏必须锁在可用高度内，否则内容撑开容器、滚动条永远不出现。"""
+        self.assertIn("grid-template-rows: minmax(0, 1fr)", self.html)
+        self.assertIn("grid-template-columns: 380px minmax(0, 1fr)", self.html)
+        self.assertIn("min-height: 0;", self.html)
+        # 详情区头尾不参与压缩，滚动只发生在 .chat-flow
+        self.assertIn("flex: 0 0 auto;", self.html)
+        self.assertIn(".chat-flow {\n    flex: 1 1 auto; overflow-y: auto; padding: 28px;\n    min-height: 0;", self.html)
+
+    def test_narrow_viewport_stacks_and_keeps_scrolling(self):
+        """窄窗口改成上下堆叠，两块区域仍各自滚动。"""
+        self.assertIn("@media (max-width: 900px)", self.html)
+        self.assertIn("grid-template-rows: minmax(0, 34%) minmax(0, 1fr)", self.html)
+
 
 # ----------------------------------------------------------------------
 # 扫码弹窗前端口径（静态检查：库方法名错会让画布空白且无降级）

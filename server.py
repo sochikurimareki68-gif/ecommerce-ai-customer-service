@@ -43,7 +43,7 @@ from collections import deque
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 ROOT = Path(__file__).resolve().parent
 
@@ -98,6 +98,9 @@ FAQ_CACHE_TTL = int(os.environ.get("FAQ_CACHE_TTL", "3600"))
 FAQ_CACHE_MAX = int(os.environ.get("FAQ_CACHE_MAX", "200"))
 # 会话 Cookie 是否强制加 Secure；留空则按请求的 X-Forwarded-Proto 自动判断（HTTPS 部署加，本地不加）
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "").strip().lower() in ("1", "true", "yes")
+# 人工接管接口（/api/pending、/api/session/*、/api/resolve）的管理口令。
+# 未配置时默认「全部拒绝」——宁可接管页打不开，也不能让待接管对话在公网裸奔。
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "").strip()
 EXTRA_ORIGINS = [
     o.strip().rstrip("/") for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()
 ]
@@ -534,7 +537,16 @@ class Handler(BaseHTTPRequestHandler):
     # 访问保护
     # ------------------------------------------------------------------
     def _client_ip(self) -> str:
-        """取真实客户端 IP。Render 之类平台会经反代，真实 IP 在 X-Forwarded-For 里。"""
+        """取真实客户端 IP —— 限流按它分桶。
+
+        线上前面有一层 Cloudflare：优先用 `CF-Connecting-IP`（由 Cloudflare 覆写，
+        客户端伪造不了）；`X-Forwarded-For` 只能退而求其次 —— 它通常是「追加」，
+        最左值可能是客户端自己填的假值，所以单 IP 限额只能算尽力而为，真正兜底的
+        是全站每日上限。
+        """
+        cf_ip = (self.headers.get("CF-Connecting-IP") or "").strip()
+        if cf_ip:
+            return cf_ip
         forwarded = self.headers.get("X-Forwarded-For", "")
         if forwarded:
             return forwarded.split(",")[0].strip()
@@ -568,6 +580,24 @@ class Handler(BaseHTTPRequestHandler):
         allowed = {f"http://{host}", f"https://{host}"} | set(EXTRA_ORIGINS)
         return origin.rstrip("/") in allowed
 
+    def _admin_allowed(self) -> tuple[bool, str]:
+        """校验人工接管接口的管理口令。
+
+        口令优先取请求头 `X-Admin-Token`，其次取 query 参数 `token`
+        （方便本地 curl 调试）。未配置 ADMIN_TOKEN 时一律拒绝：接管接口里
+        是真实用户对话，宁可默认关闭，也不能在公网裸奔。
+        """
+        if not ADMIN_TOKEN:
+            return False, "服务端未配置 ADMIN_TOKEN，接管接口默认关闭"
+        supplied = (self.headers.get("X-Admin-Token") or "").strip()
+        if not supplied:
+            query = parse_qs(urlparse(self.path).query)
+            supplied = (query.get("token") or [""])[0].strip()
+        if not supplied or not secrets.compare_digest(
+                supplied.encode("utf-8"), ADMIN_TOKEN.encode("utf-8")):
+            return False, "管理口令不正确"
+        return True, ""
+
     # ------------------------------------------------------------------
     # 路由
     # ------------------------------------------------------------------
@@ -589,13 +619,17 @@ class Handler(BaseHTTPRequestHandler):
                 "uptime": round(time.time() - _PROCESS_START, 1),   # I-2：进程存活秒数，探活后可证明服务持续在线
             })
             return
-        # I-4：人工接管轻量版 API（只读，无鉴权；demo 阶段面试时说"下一步加 token"）
-        if path == "/api/pending":
-            self._handle_pending_list()
-            return
-        if path.startswith("/api/session/"):
-            sid = path[len("/api/session/"):]
-            self._handle_pending_detail(sid)
+        # I-4：人工接管轻量版 API（管理口令保护，见 _admin_allowed）
+        if path == "/api/pending" or path.startswith("/api/session/"):
+            ok, reason = self._admin_allowed()
+            if not ok:
+                self._reject(503 if not ADMIN_TOKEN else 403, reason)
+                return
+            if path == "/api/pending":
+                self._handle_pending_list()
+            else:
+                sid = path[len("/api/session/"):]
+                self._handle_pending_detail(sid)
             return
         self._serve_static(path)
 
@@ -611,6 +645,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         # I-4：人工接管——标记已处理（从队列移除）
         if path == "/api/resolve":
+            ok, reason = self._admin_allowed()
+            if not ok:
+                self._reject(503 if not ADMIN_TOKEN else 403, reason)
+                return
             self._handle_pending_resolve()
             return
         self._reject(404, "接口不存在")
@@ -676,7 +714,9 @@ class Handler(BaseHTTPRequestHandler):
                 if entry.get("resolved"):
                     continue
                 items.append({
-                    "session_id": sid[:12],            # cookie token 只取前 12 位展示，不暴露完整
+                    # 管理接口已鉴权，列表直接给完整 session_id，详情/标记按完整值精确匹配。
+                    # 前端展示时再截前 12 位，避免界面上铺满长 token。
+                    "session_id": sid,
                     "session_len": len(sid),            # 给人工确认是否为真 token 时参考
                     "ts": entry["ts"],
                     "time_str": datetime.fromtimestamp(entry["ts"]).strftime("%H:%M:%S"),
@@ -696,21 +736,23 @@ class Handler(BaseHTTPRequestHandler):
         })
 
     def _handle_pending_detail(self, sid: str) -> None:
-        """GET /api/session/{id} —— 查看某会话完整历史（只读）。"""
+        """GET /api/session/{id} —— 查看某会话完整历史（只读）。
+
+        只接受完整 token：不再做前缀匹配，否则空串会把整个队列的第一条
+        直接匹配出来。
+        """
+        if len(sid) < 16:
+            self._reject(400, "session_id 不合法（需要完整 token）")
+            return
         with PENDING_HANDOFF_LOCK:
-            # 支持用完整 token 或前 12 位查询
             key = sid if sid in PENDING_HANDOFF else None
-            if key is None:
-                for k in PENDING_HANDOFF:
-                    if k.startswith(sid):
-                        key = k
-                        break
             if key is None:
                 self._send_json(404, {"error": "会话不存在或已被清理"})
                 return
             entry = PENDING_HANDOFF[key]
             detail = {
-                "session_id": key[:12],
+                "session_id": key,
+                "session_id_short": key[:12],
                 "time_str": datetime.fromtimestamp(entry["ts"]).strftime("%Y-%m-%d %H:%M:%S"),
                 "user_ip_hash": entry["user_ip_hash"],
                 "resolved": entry.get("resolved", False),
@@ -745,14 +787,13 @@ class Handler(BaseHTTPRequestHandler):
         if not sid:
             self._reject(400, "缺少 session_id")
             return
+        if len(sid) < 16:
+            self._reject(400, "session_id 不合法（需要完整 token）")
+            return
 
         with PENDING_HANDOFF_LOCK:
+            # 只接受完整 token，不做前缀匹配（空串/短前缀会误伤别的会话）
             key = sid if sid in PENDING_HANDOFF else None
-            if key is None:
-                for k in PENDING_HANDOFF:
-                    if k.startswith(sid):
-                        key = k
-                        break
             if key is None:
                 self._send_json(404, {"error": "会话不存在或已被清理"})
                 return
@@ -1100,11 +1141,13 @@ class Handler(BaseHTTPRequestHandler):
         ua = (self.headers.get("User-Agent", "") if self.headers else "")[:120]
         # status 兼容 BaseHTTPRequestHandler 的 "%s" %s %s 与 "%s" 两种调用
         status = args[1] if len(args) > 1 else (args[0] if args else "")
+        # 管理口令支持走 ?token= 方便 curl 调试，日志里必须打码，不能落进 Render 日志
+        safe_path = re.sub(r"([?&]token=)[^&]*", r"\1***", self.path)
         rec = {
             "t": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
             "level": "access",
             "method": self.command,
-            "path": self.path,
+            "path": safe_path,
             "status": str(status),
             "ip_hash": _hash_for_log(ip),
             "ua": ua,

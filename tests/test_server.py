@@ -38,9 +38,10 @@ class FakeHeaders(dict):
 class FakeHandler:
     """只保留 Handler 小工具需要的属性，不碰 socket。"""
 
-    def __init__(self, headers=None, client=("9.9.9.9", 12345)):
+    def __init__(self, headers=None, client=("9.9.9.9", 12345), path="/api/pending"):
         self.headers = FakeHeaders(headers or {})
         self.client_address = client
+        self.path = path
 
 
 class FakeSse:
@@ -293,9 +294,41 @@ class HandlerHelpersTest(unittest.TestCase):
         handler = FakeHandler({"X-Forwarded-For": "1.2.3.4, 5.6.7.8"})
         self.assertEqual(server.Handler._client_ip(handler), "1.2.3.4")
 
+    def test_client_ip_prefers_cloudflare_header(self):
+        # CF-Connecting-IP 由 Cloudflare 覆写、客户端伪造不了，优先级高于 XFF
+        handler = FakeHandler({
+            "CF-Connecting-IP": "8.8.8.8",
+            "X-Forwarded-For": "1.2.3.4, 5.6.7.8",
+        })
+        self.assertEqual(server.Handler._client_ip(handler), "8.8.8.8")
+
     def test_client_ip_falls_back_to_socket(self):
         handler = FakeHandler({}, client=("10.0.0.7", 1234))
         self.assertEqual(server.Handler._client_ip(handler), "10.0.0.7")
+
+    def test_admin_rejects_when_token_not_configured(self):
+        handler = FakeHandler({"X-Admin-Token": "anything"})
+        with mock.patch.object(server, "ADMIN_TOKEN", ""):
+            ok, _ = server.Handler._admin_allowed(handler)
+            self.assertFalse(ok)
+
+    def test_admin_rejects_wrong_token(self):
+        handler = FakeHandler({"X-Admin-Token": "wrong"})
+        with mock.patch.object(server, "ADMIN_TOKEN", "s3cret"):
+            ok, _ = server.Handler._admin_allowed(handler)
+            self.assertFalse(ok)
+
+    def test_admin_accepts_header_token(self):
+        handler = FakeHandler({"X-Admin-Token": "s3cret"})
+        with mock.patch.object(server, "ADMIN_TOKEN", "s3cret"):
+            ok, _ = server.Handler._admin_allowed(handler)
+            self.assertTrue(ok)
+
+    def test_admin_accepts_query_token(self):
+        handler = FakeHandler({}, path="/api/pending?token=s3cret")
+        with mock.patch.object(server, "ADMIN_TOKEN", "s3cret"):
+            ok, _ = server.Handler._admin_allowed(handler)
+            self.assertTrue(ok)
 
     def test_error_message_known_code(self):
         message = server.Handler._error_message('{"code": 4013}', "兜底")

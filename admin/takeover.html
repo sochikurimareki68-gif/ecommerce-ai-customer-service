@@ -230,7 +230,7 @@
     <div class="hint">轻量版 · <b>只读</b> · 标记已处理 · 无人工下发能力</div>
   </div>
   <div class="env">
-    <span style="font-size:11px;color:#a8a59e;">v2.0.3 · server.py 1.13 · I-4</span>
+    <span style="font-size:11px;color:#a8a59e;">v2.0.3 · server.py 1.14 · I-4</span>
   </div>
 </header>
 
@@ -261,22 +261,58 @@
 
 <footer>
   ⚠️ 轻量版：人工接管后不会向用户下发任何回复。需要回复用户请通过电话/IM 等其他渠道。
-  面试时可说明"下一步加 resolved 标记 + 审计日志 + token 鉴权"。
+  管理接口已启用口令鉴权（服务端 ADMIN_TOKEN）。
 </footer>
 
 <script>
 const BASE = window.location.origin;
+const TOKEN_KEY = "ym_admin_token";
+let adminToken = sessionStorage.getItem(TOKEN_KEY) || "";
 let selectedSid = null;
+let autoTimer = null;
+
+function promptToken() {
+  const input = prompt("请输入管理口令（服务端环境变量 ADMIN_TOKEN）");
+  if (input && input.trim()) {
+    adminToken = input.trim();
+    sessionStorage.setItem(TOKEN_KEY, adminToken);
+  }
+  return adminToken;
+}
+
+async function adminFetch(path, opts = {}) {
+  if (!adminToken && !promptToken()) {
+    throw new Error("未输入管理口令");
+  }
+  const headers = Object.assign({}, opts.headers || {}, { "X-Admin-Token": adminToken });
+  return fetch(BASE + path, Object.assign({}, opts, { headers }));
+}
+
+function authError(message) {
+  adminToken = "";
+  sessionStorage.removeItem(TOKEN_KEY);
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  document.getElementById("queueList").innerHTML =
+    `<div class="empty"><div class="emoji">🔒</div>${escapeHtml(message)}<br>点击「刷新队列」重新输入口令</div>`;
+}
 
 async function refresh() {
   try {
-    const r = await fetch(BASE + "/api/pending");
+    const r = await adminFetch("/api/pending");
+    if (r.status === 403 || r.status === 503) {
+      const data = await r.json().catch(() => ({}));
+      authError(data.error || "管理口令不正确");
+      return;
+    }
     const data = await r.json();
     document.getElementById("pendingCount").textContent = data.pending;
     renderQueue(data.items);
+    if (!autoTimer) autoTimer = setInterval(refresh, 10000);
   } catch (e) {
-    document.getElementById("queueList").innerHTML =
-      '<div class="empty"><div class="emoji">❌</div>连接后端失败，请确认 server.py 正在运行</div>';
+    const noToken = e.message === "未输入管理口令";
+    document.getElementById("queueList").innerHTML = noToken
+      ? '<div class="empty"><div class="emoji">🔒</div>未输入管理口令，点击「刷新队列」重试</div>'
+      : '<div class="empty"><div class="emoji">❌</div>连接后端失败，请确认 server.py 正在运行</div>';
   }
 }
 
@@ -288,13 +324,13 @@ function renderQueue(items) {
   }
   el.innerHTML = items.map(item => `
     <div class="queue-item ${selectedSid === item.session_id ? 'active' : ''}"
-         onclick="selectItem('${item.session_id}')">
+         onclick="selectItem('${escapeHtml(item.session_id)}')">
       <div class="q-meta">
-        <span>${item.time_str} · IP ${item.user_ip_hash.slice(0,8)}…</span>
-        <span class="badge">${item.msg_count} 条消息</span>
+        <span>${escapeHtml(item.time_str)} · IP ${escapeHtml(item.user_ip_hash.slice(0,8))}…</span>
+        <span class="badge">${escapeHtml(String(item.msg_count))} 条消息</span>
       </div>
-      <div class="q-preview">👤 ${item.last_user}</div>
-      <div class="q-preview" style="font-size:12px;color:#a8a59e;margin-top:2px;">🤖 ${item.last_reply_preview}</div>
+      <div class="q-preview">👤 ${escapeHtml(item.last_user)}</div>
+      <div class="q-preview" style="font-size:12px;color:#a8a59e;margin-top:2px;">🤖 ${escapeHtml(item.last_reply_preview)}</div>
     </div>
   `).join("");
 }
@@ -303,7 +339,12 @@ async function selectItem(sid) {
   selectedSid = sid;
   refresh(); // 更新高亮
   try {
-    const r = await fetch(BASE + "/api/session/" + encodeURIComponent(sid));
+    const r = await adminFetch("/api/session/" + encodeURIComponent(sid));
+    if (r.status === 403 || r.status === 503) {
+      const data = await r.json().catch(() => ({}));
+      authError(data.error || "管理口令不正确");
+      return;
+    }
     if (!r.ok) { throw new Error("not found"); }
     const data = await r.json();
     renderDetail(data);
@@ -325,22 +366,24 @@ function renderDetail(data) {
       <div class="avatar">🤖</div>
       <div>
         <div class="bubble">${escapeHtml(m.text)}</div>
-        <div class="time">${m.time}</div>
+        <div class="time">${escapeHtml(m.time)}</div>
       </div>
     </div>`;
   }).join("");
+  const sidShort = escapeHtml(data.session_id_short || data.session_id.slice(0, 12));
+  const sidFull = escapeHtml(data.session_id);
 
   document.getElementById("detail").innerHTML = `
     <div class="detail-header">
-      <h2>完整对话 <span class="sid">session_id: ${data.session_id}…</span></h2>
+      <h2>完整对话 <span class="sid">session_id: ${sidShort}…</span></h2>
       <div class="actions">
-        <button class="ghost" onclick="selectItem('${data.session_id}')">🔄 刷新详情</button>
-        <button onclick="resolve('${data.session_id}')">✅ 标记已处理</button>
+        <button class="ghost" onclick="selectItem('${sidFull}')">🔄 刷新详情</button>
+        <button onclick="resolve('${sidFull}')">✅ 标记已处理</button>
       </div>
     </div>
     <div class="chat-flow">${msgs}</div>
     <div style="padding:8px 24px;font-size:11px;color:#a8a59e;border-top:1px solid #e8e0d1;background:#fff;">
-      入队时间 ${data.time_str} · 用户 IP 哈希 ${data.user_ip_hash} · 轻量版只读，无法在此回复用户
+      入队时间 ${escapeHtml(data.time_str)} · 用户 IP 哈希 ${escapeHtml(data.user_ip_hash)} · 轻量版只读，无法在此回复用户
     </div>
   `;
 }
@@ -348,11 +391,16 @@ function renderDetail(data) {
 async function resolve(sid) {
   if (!confirm("标记已处理？该会话将从队列移除。\n\n注意：轻量版不会向用户下发任何回复。")) return;
   try {
-    const r = await fetch(BASE + "/api/resolve", {
+    const r = await adminFetch("/api/resolve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sid })
     });
+    if (r.status === 403 || r.status === 503) {
+      const data = await r.json().catch(() => ({}));
+      authError(data.error || "管理口令不正确");
+      return;
+    }
     if (!r.ok) throw new Error("resolve failed");
     selectedSid = null;
     document.getElementById("detail").innerHTML =
@@ -365,14 +413,12 @@ async function resolve(sid) {
 
 function escapeHtml(s) {
   const d = document.createElement("div");
-  d.textContent = s;
+  d.textContent = s == null ? "" : String(s);
   return d.innerHTML;
 }
 
-// 启动
+// 启动：首次会提示输入管理口令，输入后存在 sessionStorage
 refresh();
-// 每 10 秒自动刷新（演示时方便，生产可关）
-setInterval(refresh, 10000);
 </script>
 </body>
 </html>

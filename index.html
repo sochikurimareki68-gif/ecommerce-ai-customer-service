@@ -626,7 +626,6 @@
   }
 </style>
   <!-- ===== I-5 二维码扫码 ===== -->
-  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
   <style>
     .qr-fab {
       position: fixed; bottom: 24px; left: 24px; z-index: 999;
@@ -1252,9 +1251,12 @@
     <h3>📱 扫码手机访问</h3>
     <p>优眠小助手 · 移动端自动适配</p>
     <canvas id="qrCanvas" width="180" height="180"></canvas>
+    <p id="qrFallback" style="display:none;word-break:break-all;font-size:12px;color:#5a4a30;"></p>
     <button class="close" onclick="closeQR()">关闭</button>
   </div>
 </div>
+<!-- 本地 vendor 版 qrcode-generator：不再从 jsDelivr 同步加载，避免 CDN 被墙时阻塞整页脚本 -->
+<script src="vendor/qrcode.min.js"></script>
 <script>
   // I-5 二维码：生成当前页面的 URL（线上自动指向 Render，本地指向 localhost）
   const QR_URL = window.location.origin + window.location.pathname.replace(/index\.html?$/, '').replace(/\/$/, '');
@@ -1266,6 +1268,14 @@
     modal.classList.add('show');
     // 延迟生成，让动画先跑
     requestAnimationFrame(() => {
+      // 二维码组件没加载成功时，退化为显示可复制的链接，不影响聊天功能
+      if (typeof qrcode !== 'function') {
+        document.getElementById('qrCanvas').style.display = 'none';
+        const fallback = document.getElementById('qrFallback');
+        fallback.textContent = '二维码组件未加载，请直接访问：' + QR_URL;
+        fallback.style.display = 'block';
+        return;
+      }
       const qr = qrcode(0, 'L');
       qr.addData(QR_URL);
       qr.make();

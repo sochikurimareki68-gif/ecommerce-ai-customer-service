@@ -20,3 +20,6 @@ services:
         value: "7694865098007035940"
       - key: COZE_API_BASE
         value: https://api.coze.cn
+      # 人工接管面板口令；不填则接管接口默认关闭（返回 503），聊天不受影响
+      - key: ADMIN_TOKEN
+        sync: false

@@ -280,12 +280,48 @@ function promptToken() {
   return adminToken;
 }
 
+class AdminError extends Error {
+  // kind：auth（未输入/口令错误）、disabled（服务端未配 ADMIN_TOKEN）、
+  //       network（请求没到服务端）、notfound（会话已清理）、server（其他服务端错误）
+  constructor(kind, message) {
+    super(message);
+    this.kind = kind;
+  }
+}
+
 async function adminFetch(path, opts = {}) {
   if (!adminToken && !promptToken()) {
-    throw new Error("未输入管理口令");
+    throw new AdminError("auth", "未输入管理口令");
   }
   const headers = Object.assign({}, opts.headers || {}, { "X-Admin-Token": adminToken });
-  return fetch(BASE + path, Object.assign({}, opts, { headers }));
+  let r;
+  try {
+    r = await fetch(BASE + path, Object.assign({}, opts, { headers }));
+  } catch (e) {
+    // fetch 抛异常只代表网络层失败（断网/DNS/服务不可达），与口令错误无关，必须分开提示
+    throw new AdminError("network", "无法连接后端服务，请检查网络后重试");
+  }
+  if (r.status === 401 || r.status === 403) {
+    const data = await r.json().catch(() => ({}));
+    throw new AdminError("auth", data.error || "管理口令不正确");
+  }
+  if (r.status === 503) {
+    const data = await r.json().catch(() => ({}));
+    throw new AdminError("disabled", data.error || "服务端未配置管理口令，接管接口已关闭");
+  }
+  if (r.status === 404) {
+    throw new AdminError("notfound", "会话不存在或已被清理");
+  }
+  if (!r.ok) {
+    throw new AdminError("server", `服务端返回错误（HTTP ${r.status}）`);
+  }
+  return r;
+}
+
+function describeError(err) {
+  if (err instanceof AdminError) return { kind: err.kind, text: err.message };
+  // 例如 200 但响应体不是 JSON
+  return { kind: "server", text: "服务端返回了无法解析的数据，请稍后重试" };
 }
 
 function authError(message) {
@@ -296,23 +332,27 @@ function authError(message) {
     `<div class="empty"><div class="emoji">🔒</div>${escapeHtml(message)}<br>点击「刷新队列」重新输入口令</div>`;
 }
 
+function showQueueError(err) {
+  const { kind, text } = describeError(err);
+  if (kind === "auth") {
+    authError(text);
+    return;
+  }
+  // 服务端没配口令时接口按设计关闭，用锁图标与「故障」区分开
+  const emoji = kind === "disabled" ? "🔒" : "❌";
+  document.getElementById("queueList").innerHTML =
+    `<div class="empty"><div class="emoji">${emoji}</div>${escapeHtml(text)}</div>`;
+}
+
 async function refresh() {
   try {
     const r = await adminFetch("/api/pending");
-    if (r.status === 403 || r.status === 503) {
-      const data = await r.json().catch(() => ({}));
-      authError(data.error || "管理口令不正确");
-      return;
-    }
     const data = await r.json();
     document.getElementById("pendingCount").textContent = data.pending;
     renderQueue(data.items);
     if (!autoTimer) autoTimer = setInterval(refresh, 10000);
   } catch (e) {
-    const noToken = e.message === "未输入管理口令";
-    document.getElementById("queueList").innerHTML = noToken
-      ? '<div class="empty"><div class="emoji">🔒</div>未输入管理口令，点击「刷新队列」重试</div>'
-      : '<div class="empty"><div class="emoji">❌</div>连接后端失败，请确认 server.py 正在运行</div>';
+    showQueueError(e);
   }
 }
 
@@ -322,35 +362,61 @@ function renderQueue(items) {
     el.innerHTML = '<div class="empty"><div class="emoji">🎉</div>队列干净，暂无待接管会话</div>';
     return;
   }
-  el.innerHTML = items.map(item => `
-    <div class="queue-item ${selectedSid === item.session_id ? 'active' : ''}"
-         onclick="selectItem('${escapeHtml(item.session_id)}')">
-      <div class="q-meta">
-        <span>${escapeHtml(item.time_str)} · IP ${escapeHtml(item.user_ip_hash.slice(0,8))}…</span>
-        <span class="badge">${escapeHtml(String(item.msg_count))} 条消息</span>
-      </div>
-      <div class="q-preview">👤 ${escapeHtml(item.last_user)}</div>
-      <div class="q-preview" style="font-size:12px;color:#a8a59e;margin-top:2px;">🤖 ${escapeHtml(item.last_reply_preview)}</div>
-    </div>
-  `).join("");
+  // 用 DOM 节点逐项构建：session_id 只进 dataset，不参与任何 HTML/JS 字符串拼接
+  el.innerHTML = "";
+  items.forEach(item => {
+    const div = document.createElement("div");
+    div.className = "queue-item" + (selectedSid === item.session_id ? " active" : "");
+    div.dataset.sid = item.session_id;
+
+    const meta = document.createElement("div");
+    meta.className = "q-meta";
+    const when = document.createElement("span");
+    when.textContent = `${item.time_str} · IP ${String(item.user_ip_hash || "").slice(0, 8)}…`;
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = `${item.msg_count} 条消息`;
+    meta.append(when, badge);
+
+    const preview = document.createElement("div");
+    preview.className = "q-preview";
+    preview.textContent = `👤 ${item.last_user || ""}`;
+
+    const reply = document.createElement("div");
+    reply.className = "q-preview";
+    reply.style.fontSize = "12px";
+    reply.style.color = "#a8a59e";
+    reply.style.marginTop = "2px";
+    reply.textContent = `🤖 ${item.last_reply_preview || ""}`;
+
+    div.append(meta, preview, reply);
+    el.appendChild(div);
+  });
 }
+
+// 事件委托：队列项点击统一在这里处理，服务端数据不出现在内联 onclick 里
+document.getElementById("queueList").addEventListener("click", ev => {
+  const item = ev.target.closest(".queue-item");
+  if (!item || !item.dataset.sid) return;
+  selectItem(item.dataset.sid);
+});
 
 async function selectItem(sid) {
   selectedSid = sid;
   refresh(); // 更新高亮
   try {
     const r = await adminFetch("/api/session/" + encodeURIComponent(sid));
-    if (r.status === 403 || r.status === 503) {
-      const data = await r.json().catch(() => ({}));
-      authError(data.error || "管理口令不正确");
-      return;
-    }
-    if (!r.ok) { throw new Error("not found"); }
     const data = await r.json();
     renderDetail(data);
   } catch (e) {
+    const { kind, text } = describeError(e);
+    if (kind === "auth") {
+      authError(text);
+      return;
+    }
+    const emoji = kind === "notfound" ? "❓" : "❌";
     document.getElementById("detail").innerHTML =
-      '<div class="detail-empty"><div class="emoji">❓</div>会话不存在或已被清理</div>';
+      `<div class="detail-empty"><div class="emoji">${emoji}</div>${escapeHtml(text)}</div>`;
   }
 }
 
@@ -371,15 +437,14 @@ function renderDetail(data) {
     </div>`;
   }).join("");
   const sidShort = escapeHtml(data.session_id_short || data.session_id.slice(0, 12));
-  const sidFull = escapeHtml(data.session_id);
   const rounds = Number(data.context_rounds) || Math.ceil(data.messages.length / 2);
 
   document.getElementById("detail").innerHTML = `
     <div class="detail-header">
       <h2>最近 ${escapeHtml(String(rounds))} 轮对话 <span class="sid">session_id: ${sidShort}…</span></h2>
       <div class="actions">
-        <button class="ghost" onclick="selectItem('${sidFull}')">🔄 刷新详情</button>
-        <button onclick="resolve('${sidFull}')">✅ 标记已处理</button>
+        <button class="ghost" id="btnRefreshDetail">🔄 刷新详情</button>
+        <button id="btnResolve">✅ 标记已处理</button>
       </div>
     </div>
     <div class="chat-flow">${msgs}</div>
@@ -387,28 +452,30 @@ function renderDetail(data) {
       入队时间 ${escapeHtml(data.time_str)} · 用户 IP 哈希 ${escapeHtml(data.user_ip_hash)} · 轻量版只读，无法在此回复用户
     </div>
   `;
+  // 按钮事件用监听器绑定，session_id 不作为内联 JS 字符串拼进页面
+  document.getElementById("btnRefreshDetail").addEventListener("click", () => selectItem(data.session_id));
+  document.getElementById("btnResolve").addEventListener("click", () => resolve(data.session_id));
 }
 
 async function resolve(sid) {
   if (!confirm("标记已处理？该会话将从队列移除。\n\n注意：轻量版不会向用户下发任何回复。")) return;
   try {
-    const r = await adminFetch("/api/resolve", {
+    await adminFetch("/api/resolve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ session_id: sid })
     });
-    if (r.status === 403 || r.status === 503) {
-      const data = await r.json().catch(() => ({}));
-      authError(data.error || "管理口令不正确");
-      return;
-    }
-    if (!r.ok) throw new Error("resolve failed");
     selectedSid = null;
     document.getElementById("detail").innerHTML =
       '<div class="detail-empty"><div class="emoji">👈</div>已处理，从队列选择下一条</div>';
     refresh();
   } catch (e) {
-    alert("标记失败：" + e.message);
+    const { kind, text } = describeError(e);
+    if (kind === "auth") {
+      authError(text);
+      return;
+    }
+    alert("标记失败：" + text);
   }
 }
 

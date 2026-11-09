@@ -658,5 +658,33 @@ class ServerIntegrationTest(unittest.TestCase):
         self.assertIn("epoch", data)
 
 
+# ----------------------------------------------------------------------
+# 接管页前端约定（静态检查，防止再退回内联拼接 / 错误混报）
+# ----------------------------------------------------------------------
+class TakeoverPageTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = Path(__file__).resolve().parents[1] / "admin" / "takeover.html"
+        cls.html = path.read_text(encoding="utf-8")
+
+    def test_no_server_data_in_inline_handlers(self):
+        """会话 ID 等数据不能再拼进内联 onclick 字符串。"""
+        self.assertNotIn("onclick=\"selectItem('", self.html)
+        self.assertNotIn("onclick=\"resolve('", self.html)
+
+    def test_queue_uses_dataset_and_event_delegation(self):
+        self.assertIn("div.dataset.sid = item.session_id", self.html)
+        self.assertIn('addEventListener("click"', self.html)
+
+    def test_auth_errors_are_separated_from_network_errors(self):
+        """401/403 提示口令错误，网络失败单独提示，不能混成一句后端故障。"""
+        self.assertIn("class AdminError", self.html)
+        self.assertIn("r.status === 401 || r.status === 403", self.html)
+        self.assertIn("r.status === 503", self.html)
+        self.assertIn("管理口令不正确", self.html)
+        self.assertIn('new AdminError("network"', self.html)
+        self.assertNotIn("请确认 server.py 正在运行", self.html)
+
+
 if __name__ == "__main__":
     unittest.main()

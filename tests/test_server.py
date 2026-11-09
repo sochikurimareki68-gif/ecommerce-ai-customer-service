@@ -58,6 +58,15 @@ class FakeSse:
     def _sse_send(self, event, data):
         self.events.append((event, data))
 
+    def _sse_start(self):
+        pass
+
+    def _sse_end(self):
+        pass
+
+    def _emit_chat_log(self, *args, **kwargs):
+        pass
+
     def _client_ip(self):
         return "9.9.9.9"
 
@@ -318,6 +327,19 @@ class SessionStoreTest(unittest.TestCase):
         self.assertEqual(history[-2]["text"], f"问{total - 1}")
         self.assertEqual(history[-1]["text"], f"答{total - 1}")
 
+    def test_handoff_state_survives_and_reset_clears_it(self):
+        """方案 B：转人工状态由服务端保存，刷新后仍在；reset 后彻底复位。"""
+        store = server.SessionStore()
+        token, _, _, _ = store.resolve("")
+        self.assertIsNone(store.handoff(token))
+        store.enter_handoff(token, token[:12])
+        self.assertEqual(store.handoff(token)["ticket"], token[:12])
+        self.assertTrue(store.append_user_message(token, "刷新后这条还在"))
+        self.assertEqual(store.history(token)[-1]["text"], "刷新后这条还在")
+        store.reset(token)
+        self.assertIsNone(store.handoff(token))
+        self.assertEqual(store.history(token), [])
+
 
 # ----------------------------------------------------------------------
 # I-4 人工接管：入队时带上最近若干轮上下文
@@ -370,6 +392,39 @@ class HandoffContextTest(unittest.TestCase):
         self.assertEqual(server.record_handoff(
             token, "9.9.9.9", "正在为您转接人工客服", []), 1)
         self.assertEqual(len(server.PENDING_HANDOFF), 2)
+
+    def test_handoff_message_goes_to_human_without_upstream_call(self):
+        """方案 B：已转人工后发消息不调上游、不出机器人回复，只落同一工单。"""
+        token, _, _, _ = server.SESSIONS.resolve("")
+        server.SESSIONS.enter_handoff(token, token[:12])
+        server.record_handoff(token, "9.9.9.9", "正在为您转接人工客服", [])
+        fake = FakeSse()
+        with mock.patch.object(server.urllib.request, "urlopen",
+                               side_effect=AssertionError("转人工后不应调用上游")):
+            server.Handler._handle_handoff_message(
+                fake, token, "订单到哪了", {"ticket": token[:12]},
+                server.SESSIONS.epoch(token))
+        kinds = [e for e, _ in fake.events]
+        self.assertEqual(kinds, ["handoff", "done"])          # 没有 delta / branch
+        info = json.loads(fake.events[0][1])
+        self.assertTrue(info["delivered"])
+        self.assertEqual(info["ticket"], token[:12])
+        self.assertEqual(server.PENDING_HANDOFF[token]["messages"][-1]["text"], "订单到哪了")
+        self.assertIn("ts", server.PENDING_HANDOFF[token]["messages"][-1])
+        self.assertEqual(server.SESSIONS.history(token)[-1]["text"], "订单到哪了")
+
+    def test_handoff_state_endpoint_reports_ticket_after_refresh(self):
+        token, _, _, _ = server.SESSIONS.resolve("")
+        server.SESSIONS.enter_handoff(token, token[:12])
+        server.record_handoff(token, "9.9.9.9", "正在为您转接人工客服", [])
+        fake = FakeJsonHandler()
+        fake._read_cookie = lambda name: token
+        fake._session_cookie = lambda t: ""
+        server.Handler._handle_handoff_state(fake)
+        self.assertEqual(fake.status, 200)
+        self.assertTrue(fake.payload["handoff"])
+        self.assertEqual(fake.payload["ticket"], token[:12])
+        self.assertEqual(fake.payload["queue_position"], 1)
 
 
 # ----------------------------------------------------------------------
@@ -761,6 +816,14 @@ class HandoffStatusPageTest(unittest.TestCase):
         # 清空对话时复位，徽标回到「在线」
         self.assertIn("handoffActive = false", self.html)
         self.assertIn("renderStatusPill();", self.html)
+
+    def test_handoff_messages_show_delivery_and_restore_state(self):
+        """方案 B：转人工后只显示送达回执、不生成机器人气泡；刷新可恢复状态。"""
+        self.assertIn("addDeliveredNotice(", self.html)
+        self.assertIn("info.delivered", self.html)
+        self.assertIn("!errored && !delivered", self.html)
+        self.assertIn("/api/handoff", self.html)
+        self.assertIn("restoreHandoffState();", self.html)
 
 
 if __name__ == "__main__":

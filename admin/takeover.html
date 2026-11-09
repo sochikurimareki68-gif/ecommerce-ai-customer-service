@@ -424,7 +424,10 @@ function renderDetail(data) {
   const msgs = data.messages.map(m => {
     if (m.role === "user") {
       return `<div class="msg user">
-        <div class="bubble">${escapeHtml(m.text)}</div>
+        <div>
+          <div class="bubble">${escapeHtml(m.text)}</div>
+          <div class="time" style="text-align:right">${escapeHtml(m.time)}</div>
+        </div>
         <div class="avatar">👤</div>
       </div>`;
     }

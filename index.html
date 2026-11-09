@@ -581,6 +581,12 @@
     font-size: 11.5px;
     line-height: 1.6;
   }
+  /* 转人工后每条消息的送达回执 */
+  .notice-line.handoff-delivered {
+    margin: 2px 0 10px;
+    font-size: 10.5px;
+    color: var(--muted);
+  }
   .chat-input input:disabled { cursor: not-allowed; opacity: 0.65; }
   body[data-mode="checking"] .quick-reply,
   body[data-mode="unavailable"] .quick-reply {
@@ -1034,7 +1040,7 @@
 
     while (true) {
       const state = await probeHealth(8000);
-      if (state === 'ok') { mode = 'live'; applyMode(); return; }
+      if (state === 'ok') { mode = 'live'; applyMode(); restoreHandoffState(); return; }
       if (state === 'static') { mode = 'demo'; applyMode(); return; }
       if (Date.now() - started >= DEADLINE_MS) { mode = 'unavailable'; applyMode(); return; }
 
@@ -1078,6 +1084,7 @@
     let bubble = null;      // 机器人气泡元素
     let answer = '';        // 已累积的回复文本
     let errored = false;    // 后端已返回错误提示时，不再叠加兜底话术
+    let delivered = false;  // 已转人工：本条消息已送达人工，不生成机器人气泡
     const myEpoch = chatEpoch;         // 本轮所属的会话世代
     const ctrl = new AbortController();
     activeStream = ctrl;
@@ -1139,7 +1146,7 @@
           if (!event) continue;
           if (chatEpoch !== myEpoch) return;   // 用户已点「清空对话」，旧回复不再渲染
 
-          // 代理下发五类事件：meta / delta / branch / handoff / error / done。
+          // 代理下发六类事件：meta / delta / branch / handoff / error / done。
           // meta 里的 conversation_id 由服务端管理（见 server.py SessionStore），
           // 前端不需要也不应该保存；branch 仅供评测统计；handoff 用来展示转人工状态。
           if (event === 'delta') {
@@ -1155,6 +1162,12 @@
             let info = {};
             try { info = JSON.parse(data) || {}; } catch (e) {}
             showHandoffNotice(info.ticket || '', info.queue_position || 0);
+            if (info.delivered) {
+              // 已转人工：移除「正在输入」，只给送达回执，不出现机器人气泡
+              delivered = true;
+              removeTyping(typingId);
+              addDeliveredNotice(info.message || '已发送给人工客服', info.at);
+            }
           } else if (event === 'error') {
             let msg = '智能体暂时无法回答，请稍后再试。';
             try { msg = JSON.parse(data).message || msg; } catch (e) {}
@@ -1165,7 +1178,7 @@
       }
 
       if (chatEpoch !== myEpoch) return;
-      if (!answer && !errored) {
+      if (!answer && !errored && !delivered) {
         ensureBubble().textContent = '亲，这个问题我需要帮您转接人工客服确认一下，请稍等哦~ 您也可以拨打客服热线 400-XXX-XXXX（工作日9:00-18:00）😊';
       }
       if (bubble) bubble.classList.remove('streaming');
@@ -1263,6 +1276,33 @@
       handoffNotice = el;
     }
     if (stick) scrollToBottom(false);
+  }
+
+  // 转人工后的单条消息送达回执（含时间），不生成机器人气泡
+  function addDeliveredNotice(text, at) {
+    const el = document.createElement('div');
+    el.className = 'notice-line handoff-delivered';
+    el.setAttribute('role', 'status');
+    const when = at ? new Date(at) : new Date();
+    const hhmmss = isNaN(when.getTime())
+      ? getTime()
+      : when.toLocaleTimeString('zh-CN', { hour12: false });
+    el.textContent = text + ' · ' + hhmmss;
+    msgBox.appendChild(el);
+    scrollToBottom(false);
+  }
+
+  // 刷新页面后从服务端恢复转人工状态（状态存在 SessionStore，不只靠前端）
+  async function restoreHandoffState() {
+    try {
+      const res = await fetch('/api/handoff', { credentials: 'same-origin', cache: 'no-store' });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.handoff) return;
+      showHandoffNotice(data.ticket || '', data.queue_position || 0);
+    } catch (e) {
+      // 状态恢复失败不影响正常聊天，保持默认「在线」即可
+    }
   }
 
   // 显示"正在输入"

@@ -284,6 +284,7 @@ class SessionStore:
                     "turn_count": 0,                  # 已完成轮次：判定会话首问（FAQ 缓存），reset 清零
                     "history": [],                    # 最近若干轮问答：转人工时随队列交给人工
                     "slots": {},                      # M-2 槽位：跨轮记住订单尾号/床型等关键信息
+                    "handoff": None,                  # 转人工状态：{"ticket","since"}，reset 清除
                     "seen": time.time(),
                 }
             session = self._data[token]
@@ -301,6 +302,7 @@ class SessionStore:
             session["turn_count"] = 0                 # 清空对话 = 重新算首问，缓存可再次命中
             session["history"] = []                   # 旧上下文一并清掉
             session["slots"] = {}                     # 清空会话时槽位一并清掉（M-2）
+            session["handoff"] = None                 # 清空对话 = 结束本次转人工，恢复正常问答
             session["seen"] = time.time()
             return session["epoch"]
 
@@ -344,6 +346,37 @@ class SessionStore:
             if not session:
                 return []
             return [dict(m) for m in session.get("history", [])]
+
+    # ---- 方案 B：转人工后对话主权交给人工 ----
+    def handoff(self, token: str) -> dict | None:
+        """返回当前会话的转人工状态；未转人工/会话不存在时返回 None。"""
+        with self._lock:
+            session = self._data.get(token)
+            state = session.get("handoff") if session else None
+            return dict(state) if state else None
+
+    def enter_handoff(self, token: str, ticket: str) -> None:
+        with self._lock:
+            session = self._data.get(token)
+            if not session:
+                return
+            if not session.get("handoff"):
+                session["handoff"] = {"ticket": ticket, "since": time.time()}
+
+    def append_user_message(self, token: str, text: str,
+                            epoch: int | None = None) -> bool:
+        """转人工后把用户消息记进会话历史（不增加轮次，不参与 FAQ 缓存）。"""
+        with self._lock:
+            session = self._data.get(token)
+            if not session:
+                return False
+            if epoch is not None and session.get("epoch", 0) != epoch:
+                return False
+            history = session.setdefault("history", [])
+            history.append({"role": "user", "text": text, "ts": time.time()})
+            if len(history) > HISTORY_MAX_MESSAGES:
+                del history[:-HISTORY_MAX_MESSAGES]
+            return True
 
     def set_conversation(self, token: str, conversation_id: str, epoch: int | None = None) -> None:
         with self._lock:
@@ -534,6 +567,14 @@ PENDING_HANDOFF: dict[str, dict] = {}
 PENDING_HANDOFF_LOCK = threading.Lock()
 PENDING_HANDOFF_MAX = 200          # 队列上限，防内存泄漏
 
+def _handoff_position_locked(session_id: str) -> int:
+    """调用方必须持有 PENDING_HANDOFF_LOCK。返回 1 起的排位，0 表示不在队列。"""
+    unresolved = [k for k in sorted(
+        PENDING_HANDOFF, key=lambda k: PENDING_HANDOFF[k]["ts"]
+    ) if not PENDING_HANDOFF[k].get("resolved")]
+    return unresolved.index(session_id) + 1 if session_id in unresolved else 0
+
+
 def record_handoff(session_id: str, user_ip: str, last_reply: str,
                    messages: list[dict]) -> int:
     """把一次转人工会话入队（幂等，同 session 只记录第一次）。
@@ -556,10 +597,32 @@ def record_handoff(session_id: str, user_ip: str, last_reply: str,
                 "last_reply": last_reply,
                 "resolved": False,
             }
-        unresolved = [k for k in sorted(
-            PENDING_HANDOFF, key=lambda k: PENDING_HANDOFF[k]["ts"]
-        ) if not PENDING_HANDOFF[k].get("resolved")]
-        return unresolved.index(session_id) + 1 if session_id in unresolved else 0
+        return _handoff_position_locked(session_id)
+
+
+def append_handoff_message(session_id: str, text: str, user_ip: str) -> int:
+    """方案 B：转人工后用户消息追加到同一工单，不新建工单，返回排位。
+
+    工单已被人工处理掉时（被 resolve 移出队列），重新建一条，保证消息不丢。
+    """
+    if not session_id:
+        return 0
+    now = time.time()
+    with PENDING_HANDOFF_LOCK:
+        entry = PENDING_HANDOFF.get(session_id)
+        if entry is None:
+            if len(PENDING_HANDOFF) >= PENDING_HANDOFF_MAX:
+                oldest = min(PENDING_HANDOFF, key=lambda k: PENDING_HANDOFF[k]["ts"])
+                PENDING_HANDOFF.pop(oldest, None)
+            entry = PENDING_HANDOFF[session_id] = {
+                "ts": now,
+                "user_ip_hash": _hash_for_log(user_ip),
+                "messages": [],
+                "last_reply": "",
+                "resolved": False,
+            }
+        entry["messages"].append({"role": "user", "text": text, "ts": now})
+        return _handoff_position_locked(session_id)
 
 # 日志里不能存明文 IP / 会话 token，统一截断成短哈希，够定位同一会话即可。
 def _hash_for_log(value: str) -> str:
@@ -713,6 +776,10 @@ class Handler(BaseHTTPRequestHandler):
                 **keepalive_snapshot(),                              # G2：最近一次真实流量与探活是否失效
             })
             return
+        # 方案 B：cookie 维度查询转人工状态，供刷新页面后恢复徽标（无需管理口令）
+        if path == "/api/handoff":
+            self._handle_handoff_state()
+            return
         # I-4：人工接管轻量版 API（管理口令保护，见 _admin_allowed）
         if path == "/api/pending" or path.startswith("/api/session/"):
             ok, reason = self._admin_allowed()
@@ -795,6 +862,9 @@ class Handler(BaseHTTPRequestHandler):
 
         token, _, _, _ = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
         epoch = SESSIONS.reset(token)
+        # 方案 B：清空对话 = 结束本次转人工，工单一并撤下，后续正常问答恢复调模型
+        with PENDING_HANDOFF_LOCK:
+            PENDING_HANDOFF.pop(token, None)
         self._pending_cookie = self._session_cookie(token)
         self._send_json(200, {"ok": True, "epoch": epoch})
 
@@ -906,19 +976,59 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # 对话代理
     # ------------------------------------------------------------------
-    def _handle_chat(self) -> None:
-        if not COZE_API_TOKEN:
-            self._reject(500, "服务端未配置 COZE_API_TOKEN，请先在 .env 中填写")
-            return
+    def _handle_handoff_message(self, token: str, message: str,
+                                state: dict, epoch: int) -> None:
+        """方案 B：已转人工的会话，消息只送达人工，不调用模型。
 
-        # ---- 第 1、2、3 层防护：来源校验 + 限流（先拦，避免白读请求体）----
-        # 注意：这些分支都在读 body 之前返回，必须用 _reject 断开连接
+        - 追加进同一工单（不新建），接管面板能看到消息与时间；
+        - 通过 handoff 事件（delivered=True）告知前端「已送达」；
+        - 不产生 delta，前端不会出现机器人气泡。
+        """
+        now = time.time()
+        SESSIONS.append_user_message(token, message, epoch)
+        position = append_handoff_message(token, message, self._client_ip())
+        self._chat_branch = ""          # 不产生新的 branch，保持评测口径不变
+        self._chat_handoff = True
+        self._chat_cache_hit = False
+        self._chat_in_tok = 0           # 没有模型调用，成本为 0
+        self._chat_out_tok = 0
+        self._chat_reply = ""
+        self._chat_ttft = round(now - self._req_start, 3)
+        self._sse_start()
+        self._sse_send("handoff", json.dumps({
+            "ticket": state.get("ticket", token[:12]),
+            "queue_position": position,
+            "delivered": True,
+            "message": "已发送给人工客服，请耐心等待～",
+            "at": datetime.fromtimestamp(now, timezone.utc).isoformat(timespec="seconds"),
+        }, ensure_ascii=False))
+        self._sse_send("done", "[DONE]")
+        try:
+            self._sse_end()
+        except OSError:
+            pass
+        self._emit_chat_log(token, message)
+
+    def _handle_handoff_state(self) -> None:
+        """刷新页面后恢复转人工状态（只读 cookie，不创建新会话）。"""
+        token = self._read_cookie(SESSION_COOKIE)
+        state = SESSIONS.handoff(token) if token else None
+        if not state:
+            self._send_json(200, {"handoff": False})
+            return
+        self._pending_cookie = self._session_cookie(token)
+        with PENDING_HANDOFF_LOCK:
+            position = _handoff_position_locked(token)
+        self._send_json(200, {
+            "handoff": True,
+            "ticket": state.get("ticket", ""),
+            "queue_position": position,
+        })
+
+    def _handle_chat(self) -> None:
+        # ---- 第 1 层防护：来源校验（先拦，避免白读请求体）----
         if not self._origin_allowed():
             self._reject(403, "请求来源不被允许")
-            return
-        allowed, reason = LIMITER.check(self._client_ip())
-        if not allowed:
-            self._reject(429, reason)
             return
 
         # ---- 第 4 层防护：请求体大小 ----
@@ -944,9 +1054,25 @@ class Handler(BaseHTTPRequestHandler):
         # 每次都下发 cookie —— 会话有效时相当于刷新有效期，用户持续使用就不会掉线。
         token, user_id, conversation_id, _ = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
         epoch = SESSIONS.epoch(token)          # 记录本轮所处的会话世代
+        self._pending_cookie = self._session_cookie(token)
+
+        # 方案 B：已转人工 → 对话主权交给人工，本条消息只落队列，绝不调用模型/缓存。
+        handoff_state = SESSIONS.handoff(token)
+        if handoff_state:
+            self._handle_handoff_message(token, message, handoff_state, epoch)
+            return
+
+        # ---- 第 2、3 层防护：限流（转人工消息不消耗模型额度，故放在其后）----
+        allowed, reason = LIMITER.check(self._client_ip())
+        if not allowed:
+            self._reject(429, reason)
+            return
+        if not COZE_API_TOKEN:
+            self._reject(500, "服务端未配置 COZE_API_TOKEN，请先在 .env 中填写")
+            return
+
         # 首问判定用会话轮次：reset 会把 turn_count 清零，点过「清空对话」后仍能重新命中缓存
         first_turn = SESSIONS.turn_count(token) == 0
-        self._pending_cookie = self._session_cookie(token)
 
         # M-2：先从本条消息抽槽位、合并进会话，再把完整槽位以一条助手快照
         # 随请求发出（auto_save_history 会存进会话历史，供回复节点读取）。
@@ -1194,6 +1320,9 @@ class Handler(BaseHTTPRequestHandler):
                 last_reply=reply_text,
                 messages=SESSIONS.history(token),
             )
+            # 方案 B：状态写进服务端会话，刷新页面后仍能恢复「等待人工接入」，
+            # 后续消息不再调用模型，全部转给人工。
+            SESSIONS.enter_handoff(token, token[:12])
             self._sse_send("handoff", json.dumps({
                 "ticket": token[:12],
                 "queue_position": position,

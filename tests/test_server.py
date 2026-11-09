@@ -686,5 +686,24 @@ class TakeoverPageTest(unittest.TestCase):
         self.assertNotIn("请确认 server.py 正在运行", self.html)
 
 
+# ----------------------------------------------------------------------
+# 扫码弹窗前端口径（静态检查：库方法名错会让画布空白且无降级）
+# ----------------------------------------------------------------------
+class QRCodePageTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        path = Path(__file__).resolve().parents[1] / "index.html"
+        cls.html = path.read_text(encoding="utf-8")
+
+    def test_uses_existing_qrcode_generator_api(self):
+        """vendor 里是 qrcode-generator@1.4.4，只有 renderTo2dContext，没有 draw。"""
+        self.assertIn("renderTo2dContext(ctx, cellSize)", self.html)
+        self.assertNotIn("qr.draw(", self.html)
+
+    def test_generation_errors_fall_back_to_clickable_link(self):
+        self.assertIn("catch (err)", self.html)
+        self.assertIn("document.createElement('a')", self.html)
+
+
 if __name__ == "__main__":
     unittest.main()

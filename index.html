@@ -1263,26 +1263,52 @@
   document.getElementById('qrFab').onclick = openQR;
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeQR(); });
 
+  // 组件缺失或生成异常时的降级：隐藏画布，给出可点击的链接
+  function showQRFallback(message) {
+    document.getElementById('qrCanvas').style.display = 'none';
+    const fallback = document.getElementById('qrFallback');
+    fallback.textContent = message;
+    const link = document.createElement('a');
+    link.href = QR_URL;
+    link.textContent = QR_URL;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    fallback.appendChild(link);
+    fallback.style.display = 'block';
+  }
+
   function openQR() {
     const modal = document.getElementById('qrModal');
     modal.classList.add('show');
     // 延迟生成，让动画先跑
     requestAnimationFrame(() => {
-      // 二维码组件没加载成功时，退化为显示可复制的链接，不影响聊天功能
+      const canvas = document.getElementById('qrCanvas');
+      // 二维码组件没加载成功时，退化为显示可点击的链接，不影响聊天功能
       if (typeof qrcode !== 'function') {
-        document.getElementById('qrCanvas').style.display = 'none';
-        const fallback = document.getElementById('qrFallback');
-        fallback.textContent = '二维码组件未加载，请直接访问：' + QR_URL;
-        fallback.style.display = 'block';
+        showQRFallback('二维码组件未加载，请直接访问：');
         return;
       }
-      const qr = qrcode(0, 'L');
-      qr.addData(QR_URL);
-      qr.make();
-      const canvas = document.getElementById('qrCanvas');
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      qr.draw(ctx, 12);
+      try {
+        const qr = qrcode(0, 'L');
+        qr.addData(QR_URL);
+        qr.make();
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        // qrcode-generator@1.4.4 没有 draw()，只有 renderTo2dContext()。
+        // 按模块数算格子大小，留 2 格静区，保证整张码落在 180×180 画布内。
+        const count = qr.getModuleCount();
+        const cellSize = Math.max(1, Math.floor(canvas.width / (count + 4)));
+        const offset = Math.floor((canvas.width - count * cellSize) / 2);
+        ctx.save();
+        ctx.translate(offset, offset);
+        qr.renderTo2dContext(ctx, cellSize);
+        ctx.restore();
+        canvas.style.display = '';
+        document.getElementById('qrFallback').style.display = 'none';
+      } catch (err) {
+        // 不能静默吞掉：生成失败同样给出可点击的链接
+        showQRFallback('二维码生成失败，请直接访问：');
+      }
     });
   }
   function closeQR() { document.getElementById('qrModal').classList.remove('show'); }

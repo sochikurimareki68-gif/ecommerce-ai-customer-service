@@ -535,24 +535,31 @@ PENDING_HANDOFF_LOCK = threading.Lock()
 PENDING_HANDOFF_MAX = 200          # 队列上限，防内存泄漏
 
 def record_handoff(session_id: str, user_ip: str, last_reply: str,
-                   messages: list[dict]) -> None:
-    """把一次转人工会话入队（幂等，同 session 只记录第一次）。"""
+                   messages: list[dict]) -> int:
+    """把一次转人工会话入队（幂等，同 session 只记录第一次）。
+
+    返回该会话在当前待接管队列中的排位（从 1 开始）。连续发「转人工」时
+    仍返回第一次入队的位置，前端据此展示「第 N 位」而不是重复建单。
+    """
     if not session_id:
-        return
+        return 0
     with PENDING_HANDOFF_LOCK:
-        if session_id in PENDING_HANDOFF:
-            return
-        # 队列满时淘汰最旧（按 ts 排序）
-        if len(PENDING_HANDOFF) >= PENDING_HANDOFF_MAX:
-            oldest = min(PENDING_HANDOFF, key=lambda k: PENDING_HANDOFF[k]["ts"])
-            PENDING_HANDOFF.pop(oldest, None)
-        PENDING_HANDOFF[session_id] = {
-            "ts": time.time(),
-            "user_ip_hash": _hash_for_log(user_ip),
-            "messages": list(messages),        # 浅拷贝，防止后续修改
-            "last_reply": last_reply,
-            "resolved": False,
-        }
+        if session_id not in PENDING_HANDOFF:
+            # 队列满时淘汰最旧（按 ts 排序）
+            if len(PENDING_HANDOFF) >= PENDING_HANDOFF_MAX:
+                oldest = min(PENDING_HANDOFF, key=lambda k: PENDING_HANDOFF[k]["ts"])
+                PENDING_HANDOFF.pop(oldest, None)
+            PENDING_HANDOFF[session_id] = {
+                "ts": time.time(),
+                "user_ip_hash": _hash_for_log(user_ip),
+                "messages": list(messages),        # 浅拷贝，防止后续修改
+                "last_reply": last_reply,
+                "resolved": False,
+            }
+        unresolved = [k for k in sorted(
+            PENDING_HANDOFF, key=lambda k: PENDING_HANDOFF[k]["ts"]
+        ) if not PENDING_HANDOFF[k].get("resolved")]
+        return unresolved.index(session_id) + 1 if session_id in unresolved else 0
 
 # 日志里不能存明文 IP / 会话 token，统一截断成短哈希，够定位同一会话即可。
 def _hash_for_log(value: str) -> str:
@@ -1062,7 +1069,7 @@ class Handler(BaseHTTPRequestHandler):
             self._emit_chat_log(token, message)
 
     def _pump_stream(self, resp, token: str, epoch: int | None = None, message: str = "") -> None:
-        """把扣子的 SSE 事件翻译成前端更简单的三类事件：meta / delta / error。"""
+        """把扣子的 SSE 事件翻译成前端更简单的事件：meta / delta / branch / handoff / error / done。"""
         # 业务日志字段：首字延迟、命中分支，在流处理中采集
         self._chat_ttft: float | None = None
         self._chat_branch: str = ""
@@ -1177,14 +1184,21 @@ class Handler(BaseHTTPRequestHandler):
         # 先把本轮的问答写进会话（轮次 + 最近若干轮历史），转人工时连同上下文一起入队
         SESSIONS.record_turn(token, message, reply_text, epoch)
 
-        # I-4：转人工时自动入队待接管（用 token 作唯一 key，幂等）
+        # I-4：转人工时自动入队待接管（用 token 作唯一 key，幂等）。
+        # 入队成功后补一个 handoff 事件：前端据此展示「已转接人工」状态与工单号，
+        # 不必再从回复话术里猜。branch 仍保持「其他兜底」，不影响现有评测口径。
         if self._chat_handoff:
-            record_handoff(
+            position = record_handoff(
                 session_id=token,
                 user_ip=self._client_ip(),
                 last_reply=reply_text,
                 messages=SESSIONS.history(token),
             )
+            self._sse_send("handoff", json.dumps({
+                "ticket": token[:12],
+                "queue_position": position,
+                "message": "已为您转接人工客服，正在等待人工接入～",
+            }, ensure_ascii=False))
 
         # P2-4：记录完整回复与输出 token，供成本日志与 FAQ 缓存使用
         self._chat_reply = reply_text

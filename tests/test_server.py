@@ -58,6 +58,9 @@ class FakeSse:
     def _sse_send(self, event, data):
         self.events.append((event, data))
 
+    def _client_ip(self):
+        return "9.9.9.9"
+
 
 class FakeJsonHandler:
     """只保留 _send_json 的假 Handler，用来直接测管理接口的处理器。"""
@@ -356,6 +359,18 @@ class HandoffContextTest(unittest.TestCase):
         self.assertEqual(fake.payload["context_rounds"], server.HANDOFF_CONTEXT_ROUNDS)
         self.assertEqual(len(fake.payload["messages"]), 4)
 
+    def test_repeat_handoff_keeps_first_position(self):
+        """连续两次「转人工」不应重复建单，排位保持第一次入队时的位置。"""
+        token = self._prepare()
+        store = server.SessionStore()
+        token2, _, _, _ = store.resolve("")
+        store.record_turn(token2, "转人工", "正在为您转接人工客服")
+        pos2 = server.record_handoff(token2, "8.8.8.8", "正在为您转接人工客服", store.history(token2))
+        self.assertEqual(pos2, 2)
+        self.assertEqual(server.record_handoff(
+            token, "9.9.9.9", "正在为您转接人工客服", []), 1)
+        self.assertEqual(len(server.PENDING_HANDOFF), 2)
+
 
 # ----------------------------------------------------------------------
 # Handler 小工具
@@ -529,6 +544,31 @@ class PumpStreamTest(unittest.TestCase):
         kinds = [e for e, _ in fake.events]
         self.assertEqual(kinds, ["error"])
         self.assertIn("超时", json.loads(fake.events[0][1])["message"])
+
+    def test_handoff_reply_emits_handoff_event(self):
+        """命中转接话术时要下发 handoff 事件，前端才能展示排队状态。"""
+        with server.PENDING_HANDOFF_LOCK:
+            server.PENDING_HANDOFF.clear()
+        try:
+            fake = FakeSse()
+            payload = json.dumps({
+                "conversation_id": "c1", "role": "assistant", "type": "answer",
+                "content": "亲~好的，马上为您转接人工客服，请您耐心等待哦~",
+            }, ensure_ascii=False)
+            resp = _sse_lines(
+                ("conversation.message.delta", payload),
+                ("done", "[DONE]"),
+            )
+            server.Handler._pump_stream(fake, resp, "token-1234567890")
+            kinds = [e for e, _ in fake.events]
+            self.assertEqual(kinds, ["meta", "delta", "branch", "handoff", "done"])
+            info = json.loads(fake.events[3][1])
+            self.assertEqual(info["ticket"], "token-123456")
+            self.assertEqual(info["queue_position"], 1)
+            self.assertIn("token-1234567890", server.PENDING_HANDOFF)
+        finally:
+            with server.PENDING_HANDOFF_LOCK:
+                server.PENDING_HANDOFF.clear()
 
 
 class StructuredOutputTest(unittest.TestCase):

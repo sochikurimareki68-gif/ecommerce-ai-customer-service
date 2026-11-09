@@ -567,6 +567,17 @@
     color: var(--muted);
     margin: 2px 0 14px;
   }
+  /* 转人工排队提示：进队列后常驻在聊天区，直到清空对话 */
+  .notice-line.handoff-notice {
+    margin: 4px 0 14px;
+    padding: 8px 12px;
+    border: 1px dashed var(--accent-ring);
+    border-radius: 10px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 11.5px;
+    line-height: 1.6;
+  }
   .chat-input input:disabled { cursor: not-allowed; opacity: 0.65; }
   body[data-mode="checking"] .quick-reply,
   body[data-mode="unavailable"] .quick-reply {
@@ -847,6 +858,7 @@
   // chatEpoch 用来防止被中断的请求把晚到的内容写进新会话。
   let activeStream = null;
   let chatEpoch = 0;
+  let handoffNotice = null;   // 转人工排队提示节点（同一会话只保留一条）
   const WELCOME_TEXT = '亲，您好！😊 欢迎来到优眠家居，我是智能客服小助手。我可以帮您解答商品信息、洗护方式、发货物流、退换货等问题。请问有什么可以帮您的呢？';
   const resetBtn = document.getElementById('resetBtn');
   const retryBtn = document.getElementById('retryBtn');
@@ -867,6 +879,7 @@
     }
 
     msgBox.innerHTML = '';
+    handoffNotice = null;
     const wrap = document.createElement('div');
     wrap.className = 'message bot';
     const bubble = document.createElement('div');
@@ -1114,9 +1127,9 @@
           if (!event) continue;
           if (chatEpoch !== myEpoch) return;   // 用户已点「清空对话」，旧回复不再渲染
 
-          // 代理下发四类事件：meta / delta / error / done。
+          // 代理下发五类事件：meta / delta / branch / handoff / error / done。
           // meta 里的 conversation_id 由服务端管理（见 server.py SessionStore），
-          // 前端不需要也不应该保存，所以这里只处理 delta 和 error，其余忽略。
+          // 前端不需要也不应该保存；branch 仅供评测统计；handoff 用来展示转人工状态。
           if (event === 'delta') {
             let piece = '';
             try { piece = JSON.parse(data).content || ''; } catch (e) {}
@@ -1126,6 +1139,10 @@
               ensureBubble().textContent = answer;
               if (stick) scrollToBottom(false);
             }
+          } else if (event === 'handoff') {
+            let info = {};
+            try { info = JSON.parse(data) || {}; } catch (e) {}
+            showHandoffNotice(info.ticket || '', info.queue_position || 0);
           } else if (event === 'error') {
             let msg = '智能体暂时无法回答，请稍后再试。';
             try { msg = JSON.parse(data).message || msg; } catch (e) {}
@@ -1211,6 +1228,27 @@
     el.textContent = text;
     msgBox.appendChild(el);
     scrollToBottom(false);
+  }
+
+  // 转人工状态：同一会话只保留一条，重复命中时更新排位与工单号
+  function showHandoffNotice(ticket, position) {
+    const stick = isNearBottom();
+    let text = '已为您转接人工客服，正在等待人工接入';
+    if (position > 0) text += '（队列第 ' + position + ' 位）';
+    if (ticket) text += ' · 工单 ' + ticket;
+    text += '～';
+
+    if (handoffNotice && handoffNotice.isConnected) {
+      handoffNotice.textContent = text;
+    } else {
+      const el = document.createElement('div');
+      el.className = 'notice-line handoff-notice';
+      el.setAttribute('role', 'status');
+      el.textContent = text;
+      msgBox.appendChild(el);
+      handoffNotice = el;
+    }
+    if (stick) scrollToBottom(false);
   }
 
   // 显示"正在输入"

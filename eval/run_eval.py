@@ -42,6 +42,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DATASET = ROOT / "eval" / "dataset.json"
 REPORT = ROOT / "eval" / "report.md"
+# G3：结构化真源，与 report.md 同时产出；README/简历声明一律以它为准
+REPORT_JSON = ROOT / "eval" / "report.json"
 MULTI_REPORT = ROOT / "eval" / "report-multi.md"
 FACT_REPORT = ROOT / "eval" / "report-facts.md"
 MEMORY_REPORT = ROOT / "eval" / "report-memory.md"
@@ -771,6 +773,46 @@ def write_report(meta: dict, s: dict, results: list[dict]) -> None:
     version = meta.get("version", "")
     save_versioned_report(version, REPORT)
     update_history_index(version, meta, s)
+    write_report_json(meta, s, results)
+
+
+def write_report_json(meta: dict, s: dict, results: list[dict]) -> None:
+    """G3：把总体指标落成结构化 JSON，作为 README 与简历声明的唯一真源。
+
+    report.md 仍给人看；脚本只读 report.json，避免从 Markdown 里正则抠数字。
+    """
+    def pct_value(key: str) -> float | None:
+        raw = str(s.get(key, "—")).rstrip("%")
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+
+    dataset = json.loads(DATASET.read_text(encoding="utf-8"))
+    payload = {
+        "schema": 1,
+        "version": meta.get("version", ""),
+        "time": meta.get("time", ""),
+        "base": meta.get("base", ""),
+        "total": s["total"],
+        "succeeded": sum(1 for r in results if r.get("ok")),
+        "failed": sum(1 for r in results if not r.get("ok")),
+        "metrics": {
+            "keyword_pct": pct_value("keyword_pct"),
+            "forbidden_pct": pct_value("forbidden_pct"),
+            "route_pct": pct_value("route_pct"),
+            "latency_avg": s["latency_avg"],
+            "ttft_avg": s["ttft_avg"],
+        },
+        "counts": {
+            "single": len(dataset.get("cases", [])),
+            "multi": len(dataset.get("multi_turn_cases", [])),
+            "facts": len(dataset.get("fact_cases", [])),
+            "security": len(dataset.get("security_cases", [])),
+            "memory": len(dataset.get("memory_cases", [])),
+        },
+    }
+    REPORT_JSON.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 # ----------------------------------------------------------------------

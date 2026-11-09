@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "version": "2.0.3",
+  "time": "2026-10-25 23:53",
+  "base": "http://localhost:3000",
+  "total": 31,
+  "succeeded": 31,
+  "failed": 0,
+  "metrics": {
+    "keyword_pct": 100.0,
+    "forbidden_pct": 100.0,
+    "route_pct": 83.9,
+    "latency_avg": 9.3,
+    "ttft_avg": 8.4
+  },
+  "counts": {
+    "single": 31,
+    "multi": 5,
+    "facts": 12,
+    "security": 6,
+    "memory": 2
+  }
+}

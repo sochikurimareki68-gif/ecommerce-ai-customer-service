@@ -2,6 +2,17 @@
 
 > 基于扣子 Coze 搭建的电商智能客服智能体，通过**单一 LLM 节点对话流**（六域合并提示词）按用户意图作答，结合 FAQ 知识库与商品目录，实现商品咨询、洗护指南、物流发货、退换售后、优惠活动等场景的自动应答。
 
+<!-- FACTS:BEGIN -->
+> **自动生成事实区** —— 由 `scripts/gen_readme_facts.py` 从代码、数据集与评测报告生成，**请勿手改**；校验命令：`python3 scripts/gen_readme_facts.py --check`。
+>
+> - 版本：v2.0.3（`server.py` 的 `__version__`）
+> - 单元测试：66 条
+> - 评测用例：单轮 31 / 多轮 5 / 事实 12 / 安全 6 / 记忆 2
+> - 对话流：LLM 节点 1 个、意图域 6 类、节点会话历史 5 轮、智能体上下文 10 轮
+> - 最新评测（v2.0.3，2026-10-25 23:53）：关键信息覆盖率 100.0%、回复规范性 100.0%；分支归属一致率 83.9%（关键词推断，仅供参考、不计入验收）
+> - `/api/health` 字段：ok, bot_id, api_base, token_ready, max_message_chars, version, uptime, last_activity_at, seconds_since_activity, keepalive_window_s, keepalive_ok
+<!-- FACTS:END -->
+
 ## 项目链接
 
 - **在线体验（可真实对话）**：[youmian-customer-service.onrender.com](https://youmian-customer-service.onrender.com)

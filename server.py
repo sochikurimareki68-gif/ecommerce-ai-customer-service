@@ -112,6 +112,40 @@ EXTRA_ORIGINS = [
 # I-2：进程启动时间戳，/api/health 的 uptime 字段（秒）由此计算，配合定时探活证明服务持续在线
 _PROCESS_START = time.time()
 
+# G4：README 事实区从这里读版本号；G2 的心跳字段也依赖下面的状态
+__version__ = "2.0.3"
+
+# ----------------------------------------------------------------------
+# G2 防复发闸门（2026-11-09）：keepalive 配了但没生效
+#
+# 真实事故：Actions 的 5 分钟定时任务被 GitHub 降频到 3.5–7 小时，实例照常休眠；
+# 而 health 里只有一个 uptime，看不出「最近一次真实流量是什么时候」，所以没人发现。
+# 这里记录「最近一次非健康检查的入站请求」时刻，health 暴露 last_activity_at 与
+# keepalive_ok。外部探活每 5 分钟打一次首页，字段就会持续更新；超过窗口即判定失效。
+# 注意：/api/health 自身不刷新心跳，否则探针永远不会显示失效。
+# ----------------------------------------------------------------------
+_ACTIVITY_LOCK = threading.Lock()
+_LAST_ACTIVITY = time.time()
+KEEPALIVE_MAX_GAP_S = int(os.environ.get("KEEPALIVE_MAX_GAP_S", "1200"))
+
+
+def mark_activity() -> None:
+    """记录一次真实入站流量（健康检查除外）。"""
+    global _LAST_ACTIVITY
+    with _ACTIVITY_LOCK:
+        _LAST_ACTIVITY = time.time()
+
+
+def keepalive_snapshot() -> dict:
+    now = time.time()
+    gap = max(0.0, now - _LAST_ACTIVITY)
+    return {
+        "last_activity_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_LAST_ACTIVITY)),
+        "seconds_since_activity": round(gap, 1),
+        "keepalive_window_s": KEEPALIVE_MAX_GAP_S,
+        "keepalive_ok": gap <= KEEPALIVE_MAX_GAP_S,
+    }
+
 
 class RateLimiter:
     """极简内存限流器：滑动窗口（每分钟）+ 计数（每天、全站）。"""
@@ -529,7 +563,7 @@ def _hash_for_log(value: str) -> str:
 
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
-    server_version = "YoumianProxy/1.14"   # 与项目当前版本对齐，方便线上排查
+    server_version = f"YoumianProxy/{__version__}"   # G4：版本号唯一来源是 __version__
 
     # 本请求需要下发的 Set-Cookie（新建会话时才会设置）
     _pending_cookie = ""
@@ -654,6 +688,9 @@ class Handler(BaseHTTPRequestHandler):
         self._req_start = time.time()
         self._pending_cookie = ""      # 同一连接会连续处理多个请求，进入时必须清空
         path = urlparse(self.path).path
+        if path != "/api/health":
+            # G2：首页/静态资源/接管页都算真实流量；健康检查自己不算，否则探针永远显示正常
+            mark_activity()
         if path == "/api/health":
             if not HEALTH_LIMITER.allow(self._client_ip()):
                 self._reject(429, "健康检查太频繁，请稍后再试")
@@ -666,6 +703,7 @@ class Handler(BaseHTTPRequestHandler):
                 "max_message_chars": MAX_MESSAGE_CHARS,
                 "version": self.server_version,
                 "uptime": round(time.time() - _PROCESS_START, 1),   # I-2：进程存活秒数，探活后可证明服务持续在线
+                **keepalive_snapshot(),                              # G2：最近一次真实流量与探活是否失效
             })
             return
         # I-4：人工接管轻量版 API（管理口令保护，见 _admin_allowed）
@@ -685,6 +723,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         self._req_start = time.time()
         self._pending_cookie = ""      # 同上
+        mark_activity()                # G2：任何入站 POST 都算真实流量
         path = urlparse(self.path).path
         if path == "/api/chat":
             self._handle_chat()

@@ -1,16 +1,12 @@
-# I-2 消除冷启动：Render 免费实例 15 分钟无入站流量即休眠，
-# 面试官点开链接最坏要等 30-60s 白屏。用 GitHub Actions 定时探活保持常醒。
+# 兜底探活（不是主方案）。GitHub 会把低活跃仓库的定时任务降频到 3.5-7 小时一次，
+# 实测「配置了但没生效」。主方案是外部探活（cron-job.org / UptimeRobot，每 5 分钟），
+# 接入步骤与失效排查见 docs/keepalive.md（G2）。
 #
-# 为什么是每 5 分钟而不是 10：GitHub 定时任务在高峰期会延迟数分钟才触发，
-# 10 分钟间隔一旦延迟就撞上 15 分钟休眠线；5 分钟留足冗余。
-# 本仓库为公开仓库，Actions 分钟数免费。
-#
-# 注意（GitHub 官方行为）：
-#   - 仓库 60 天无 push 时，定时任务会被自动停用（本仓库在持续迭代，无此风险）
-#   - 定时任务只在默认分支（main）上生效
+# 本文件保留作第二道保险；探活目标改为首页而不是 /api/health —— 健康检查被特意排除在
+# 心跳统计之外，打 /api/health 不会刷新 last_activity_at。
 #
 # 面试前手动预热：Actions → Keepalive → Run workflow，或本地直接
-#   curl https://youmian-customer-service.onrender.com/api/health
+#   curl https://youmian-customer-service.onrender.com/
 #
 # 回滚：删除本文件即可（服务功能不受影响）。
 
@@ -25,14 +21,20 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: 探活 /api/health
+      - name: 探活首页（会刷新 last_activity_at）
         run: |
           set -e
           # 若实例已休眠，首个请求需 30-60s 唤醒，超时给足 180s
-          code=$(curl -sS -o /tmp/health.json -w "%{http_code}" --max-time 180 \
-            "https://youmian-customer-service.onrender.com/api/health")
+          code=$(curl -sS -o /tmp/index.html -w "%{http_code}" --max-time 180 \
+            "https://youmian-customer-service.onrender.com/")
           echo "HTTP $code"
+          test "$code" = "200"
+
+      - name: 验证心跳已更新
+        run: |
+          set -e
+          curl -sS --max-time 60 \
+            "https://youmian-customer-service.onrender.com/api/health" -o /tmp/health.json
           cat /tmp/health.json
           echo
-          test "$code" = "200"
-          grep -q '"ok": *true' /tmp/health.json
+          grep -q '"keepalive_ok": *true' /tmp/health.json

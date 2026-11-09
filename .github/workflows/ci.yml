@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # G5 要用完整提交历史算项目真实起止月份，浅克隆只剩 HEAD 会误判
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -34,3 +37,15 @@ jobs:
       - name: 评测脚本 smoke test（仅加载，不调用接口）
         run: |
           python eval/run_eval.py --help
+
+      # G3：评测报告 ↔ 简历声明 ↔ README 事实区，数字必须一致
+      - name: G3 数字一致性
+        run: python scripts/check_claims.py
+
+      # G4：README 事实区必须由脚本生成，手改或过期即失败
+      - name: G4 README 事实区
+        run: python scripts/gen_readme_facts.py --check
+
+      # G5：简历声明的项目起止月份必须与 git 首个提交一致（投递前也手动跑一次）
+      - name: G5 简历日期与 git 一致
+        run: python scripts/resume_dates.py

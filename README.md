@@ -205,10 +205,10 @@ GitHub Pages 只能托管静态文件，跑不了后端，所以**真实对话�
 打开 `https://你的域名/api/health`，应返回：
 
 ```json
-{"ok": true, "bot_id": "7694865098007035940", "api_base": "https://api.coze.cn", "token_ready": true, "version": "YoumianProxy/1.14"}
+{"ok": true, "bot_id": "7694865098007035940", "api_base": "https://api.coze.cn", "token_ready": true, "version": "YoumianProxy/2.0.3", "uptime": 3600.0, "last_activity_at": "2026-11-09T08:05:00Z", "seconds_since_activity": 42.3, "keepalive_window_s": 1200, "keepalive_ok": true}
 ```
 
-`token_ready` 为 `false` 说明环境变量没配上；`version` 可以用来确认这次部署的代码是否真的上线；`ok` 都拿不到说明服务没起来。
+`token_ready` 为 `false` 说明环境变量没配上；`version` 可以用来确认这次部署的代码是否真的上线；`ok` 都拿不到说明服务没起来。`keepalive_ok` 为 `false` 表示最近 20 分钟没有真实流量，外部探活可能失效，排查见 [`docs/keepalive.md`](docs/keepalive.md)。
 
 ### 每次发布前照清单走
 

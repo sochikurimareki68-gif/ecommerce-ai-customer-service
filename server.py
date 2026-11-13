@@ -47,6 +47,11 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 ROOT = Path(__file__).resolve().parent
 
+from kb_numeric_guard import (  # noqa: E402  （同目录模块，必须在 ROOT 之后导入）
+    find_violation as find_numeric_violation,
+    load_manifest as load_numeric_manifest,
+)
+
 
 def load_dotenv(path: Path) -> None:
     """极简 .env 解析：KEY=VALUE，忽略空行与 # 注释。已存在的环境变量优先。"""
@@ -97,6 +102,25 @@ PROMPT_OVERHEAD_TOK = int(os.environ.get("PROMPT_OVERHEAD_TOK", "300"))
 # 首问判定用轮次而不是 epoch：epoch 在 reset 后会持续 +1，用它判首问会导致「清空对话」后再也不命中缓存。
 FAQ_CACHE_TTL = int(os.environ.get("FAQ_CACHE_TTL", "3600"))
 FAQ_CACHE_MAX = int(os.environ.get("FAQ_CACHE_MAX", "200"))
+
+# 数值守卫：默认开启，NUMERIC_GUARD_ENABLED=0 可单独关闭灰度。
+NUMERIC_GUARD_ENABLED = os.environ.get("NUMERIC_GUARD_ENABLED", "1").strip().lower() not in (
+    "0", "false", "no", "off",
+)
+NUMERIC_MANIFEST = None
+_NUMERIC_MANIFEST_PATH = Path(
+    os.environ.get("KB_NUMERIC_MANIFEST", str(ROOT / "data" / "kb_numeric_manifest.json"))
+)
+if not _NUMERIC_MANIFEST_PATH.is_absolute():
+    _NUMERIC_MANIFEST_PATH = ROOT / _NUMERIC_MANIFEST_PATH
+try:
+    NUMERIC_MANIFEST = load_numeric_manifest(_NUMERIC_MANIFEST_PATH)
+except (OSError, ValueError) as exc:
+    print(json.dumps(
+        {"level": "guard", "kind": "manifest_load_failed", "error": str(exc)},
+        ensure_ascii=False,
+    ))
+
 # 会话 Cookie 是否强制加 Secure；留空则按请求的 X-Forwarded-Proto 自动判断（HTTPS 部署加，本地不加）
 COOKIE_SECURE = os.environ.get("COOKIE_SECURE", "").strip().lower() in ("1", "true", "yes")
 # 人工接管接口（/api/pending、/api/session/*、/api/resolve）的管理口令。
@@ -523,6 +547,97 @@ BRANCH_ORDER = ("商品咨询", "洗护指南", "物流发货", "退换售后", 
 # 回复里出现这些话术说明这轮实际转人工了（分支仍按内容归为「其他兜底」，与评测期望一致）
 HANDOFF_MARKERS = ("正在为您转接", "转接人工客服")
 
+# 方案 B：知识库无答案时，提示词只输出标记，话术统一由服务端替换。
+# 这样改一句兜底话术不用回去改 5 个提示词、也不用重新发布对话流。
+NO_ANSWER_MARKER = "[[NO_ANSWER]]"
+# 发票类单独走一条兜底：话术必须含「正在为您转接」「转接人工客服」，确保仍能建工单。
+NO_ANSWER_INVOICE_MARKER = "[[NO_ANSWER_INVOICE]]"
+NO_ANSWER_MARKERS = (NO_ANSWER_MARKER, NO_ANSWER_INVOICE_MARKER)
+NO_ANSWER_REPLY = (
+    "亲，这边暂时没有查到准确资料，为了不耽误您，正在为您转接人工客服，"
+    "请稍等~ 您也可以回复“转人工”，由人工客服继续跟进"
+)
+NO_ANSWER_INVOICE_REPLY = (
+    "亲～发票需要人工为您开具，正在为您转接人工客服，请稍等~ "
+    "您也可以回复“转人工”，由人工客服继续跟进"
+)
+NO_ANSWER_REPLIES = {
+    NO_ANSWER_MARKER: NO_ANSWER_REPLY,
+    NO_ANSWER_INVOICE_MARKER: NO_ANSWER_INVOICE_REPLY,
+}
+# 未登记的占位符（如 [[SOME_MARK]]）同样不能漏给用户；能识别就按兜底处理，否则删掉标记。
+GENERIC_PLACEHOLDER_RE = re.compile(r"\[\[[A-Z][A-Z0-9_]*\]\]")
+
+
+def log_guard_event(kind: str, **fields) -> None:
+    """守卫结构化日志。与访问日志分开，level=guard 便于线上单独检索。"""
+    record = {"t": time.strftime("%Y-%m-%dT%H:%M:%S"), "level": "guard", "kind": kind}
+    record.update(fields)
+    print(json.dumps(record, ensure_ascii=False))
+
+
+def replace_no_answer_marker(text: str) -> str:
+    """只含标记 → 整段换成对应兜底话术；标记夹在实质答复里 → 只删标记，不追加话术。"""
+    hit = next((marker for marker in NO_ANSWER_MARKERS if marker in text), "")
+    found = [marker for marker in NO_ANSWER_MARKERS if marker in text]
+    found.extend(GENERIC_PLACEHOLDER_RE.findall(text))
+    if not found:
+        return text
+    stripped = text
+    for marker in NO_ANSWER_MARKERS:
+        stripped = stripped.replace(marker, "")
+    stripped = GENERIC_PLACEHOLDER_RE.sub("", stripped)
+    only_marker = stripped.strip() == ""
+    log_guard_event(
+        "placeholder",
+        markers=sorted(set(found)),
+        action="fallback" if only_marker else "stripped",
+    )
+    if only_marker:
+        if hit:
+            return NO_ANSWER_REPLIES[hit]
+        return NO_ANSWER_REPLY
+    return stripped
+
+
+def split_no_answer_stream(buffer: str) -> tuple[str, str]:
+    """流式下发的切分：返回 (可立即下发的内容, 继续暂缓的尾部)。
+
+    标记不能泄漏给前端，所以整段只有标记时先扣住，等流结束再决定是否替换；
+    标记前后已有实质内容时只删标记本身。普通、发票和未登记标记都要覆盖。
+    """
+    hits = [(buffer.find(marker), marker) for marker in NO_ANSWER_MARKERS if marker in buffer]
+    if hits:
+        idx, marker = min(hits, key=lambda item: item[0])
+        before = buffer[:idx]
+        after = buffer[idx + len(marker):]
+        if not before.strip() and not after.strip():
+            return "", buffer
+        cleaned = buffer
+        for m in NO_ANSWER_MARKERS:
+            cleaned = cleaned.replace(m, "")
+        return cleaned, ""
+    generic = GENERIC_PLACEHOLDER_RE.search(buffer)
+    if generic:
+        before = buffer[:generic.start()]
+        after = buffer[generic.end():]
+        if not before.strip() and not after.strip():
+            return "", buffer
+        return GENERIC_PLACEHOLDER_RE.sub("", buffer), ""
+    # 没有完整标记，但尾部可能是某个标记的前半截，也要暂缓
+    hold = 0
+    for marker in NO_ANSWER_MARKERS:
+        for size in range(min(len(buffer), len(marker) - 1), hold, -1):
+            if buffer.endswith(marker[:size]):
+                hold = size
+                break
+    partial = re.search(r"\[\[[A-Z0-9_]*$", buffer)
+    if partial:
+        hold = max(hold, len(buffer) - partial.start())
+    if hold:
+        return buffer[:-hold], buffer[-hold:]
+    return buffer, ""
+
 
 def infer_branch(message: str, reply: str) -> str:
     """按关键词命中数推断分支。回复内容权重高于用户消息；平分时按 BRANCH_ORDER 取先。"""
@@ -534,6 +649,98 @@ def infer_branch(message: str, reply: str) -> str:
         if score > best_score:
             best, best_score = name, score
     return best or "其他兜底"
+
+
+def guard_completed_reply(text: str, message: str) -> tuple[str, object]:
+    """非流式路径整段校验：返回 (可下发文本, 冲突对象或 None)。"""
+    if not NUMERIC_GUARD_ENABLED or NUMERIC_MANIFEST is None or not text:
+        return text, None
+    violation = find_numeric_violation(text, message, NUMERIC_MANIFEST)
+    if violation is not None:
+        return NO_ANSWER_REPLY, violation
+    return text, None
+
+
+_STREAM_BOUNDARY_RE = re.compile(r"[。！？!?；;\n，,]")
+_DIGIT_RE = re.compile(r"\d")
+
+
+def _last_boundary_cut(text: str, limit: int) -> int:
+    cut = 0
+    for idx in range(min(limit, len(text))):
+        if text[idx] in "。！？!?；;\n，,":
+            cut = idx + 1
+    return cut
+
+
+class NumericGuardStream:
+    """流式数值守卫：只暂扣含数字的句段到标点边界，其余内容即时放行。
+
+    不含数字的内容完全不缓冲，保持原有逐字体验；含数字的句段在边界处
+    统一校验，冲突时丢弃该句段并下发兜底，避免错数字漏给用户。
+    """
+
+    def __init__(self, message: str):
+        self.message = message or ""
+        self.pending = ""
+        self.context = ""
+        self.blocked = False
+        self.violation = None
+
+    def _check(self, segment: str):
+        return find_numeric_violation(
+            segment, self.message + "\n" + self.context, NUMERIC_MANIFEST
+        )
+
+    def feed(self, text: str) -> list[str]:
+        if not text or self.blocked:
+            return []
+        if not NUMERIC_GUARD_ENABLED or NUMERIC_MANIFEST is None:
+            return [text]
+        self.pending += text
+        out: list[str] = []
+        while self.pending:
+            digit = _DIGIT_RE.search(self.pending)
+            if digit is None:
+                out.append(self.pending)
+                self.context = (self.context + self.pending)[-80:]
+                self.pending = ""
+                break
+            boundary = _STREAM_BOUNDARY_RE.search(self.pending, digit.start())
+            if boundary is None:
+                cut = _last_boundary_cut(self.pending, digit.start())
+                if cut:
+                    out.append(self.pending[:cut])
+                    self.context = (self.context + self.pending[:cut])[-80:]
+                    self.pending = self.pending[cut:]
+                break
+            end = boundary.end()
+            segment = self.pending[:end]
+            violation = self._check(segment)
+            if violation is not None:
+                self.blocked = True
+                self.violation = violation
+                out.append(NO_ANSWER_REPLY)
+                self.pending = ""
+                break
+            out.append(segment)
+            self.context = (self.context + segment)[-80:]
+            self.pending = self.pending[end:]
+        return out
+
+    def finish(self) -> list[str]:
+        if self.blocked or not self.pending:
+            return []
+        segment = self.pending
+        self.pending = ""
+        if not NUMERIC_GUARD_ENABLED or NUMERIC_MANIFEST is None:
+            return [segment]
+        violation = self._check(segment)
+        if violation is not None:
+            self.blocked = True
+            self.violation = violation
+            return [NO_ANSWER_REPLY]
+        return [segment]
 
 
 # FAQ 首问缓存：key=归一化问题，value=(reply, branch, 写入时间戳)
@@ -1114,6 +1321,9 @@ class Handler(BaseHTTPRequestHandler):
         self._chat_handoff = False
         self._chat_reply = ""
         self._chat_out_tok = 0
+        self._chat_guard_blocked = False
+        self._chat_guard_metric = ""
+        self._chat_guard_value = None
         resp = None  # 提前初始化，保证 finally 里 resp.close() 在缓存命中路径不报错
 
         # P2-4 FAQ 缓存：只缓存会话首问（first_turn），相同问题直接回放，不调用模型。
@@ -1123,24 +1333,32 @@ class Handler(BaseHTTPRequestHandler):
             cached = faq_cache_get(cache_key)
             if cached is not None:
                 cached_reply, cached_branch = cached
-                self._chat_ttft = round(time.time() - self._req_start, 2)
-                self._chat_branch = cached_branch
-                self._chat_reply = cached_reply
-                self._chat_out_tok = estimate_tokens(cached_reply)
-                self._chat_cache_hit = True
-                SESSIONS.record_turn(token, message, cached_reply, epoch)
-                self._sse_start()
-                self._sse_send("delta", json.dumps({"content": cached_reply}, ensure_ascii=False))
-                if cached_branch:
-                    self._sse_send("branch", json.dumps({"branch": cached_branch}, ensure_ascii=False))
-                self._sse_send("done", "[DONE]")
-                # 缓存命中分支在下面的 try/finally 之外，必须自己收尾：终结 chunked 流 + 写日志
-                try:
-                    self._sse_end()
-                except OSError:
-                    pass
-                self._emit_chat_log(token, message)
-                return  # 不调用扣子
+                # 缓存内容写入前已校验过；这里再校验一次，清单若更新可及时淘汰旧值。
+                cached_reply, violation = guard_completed_reply(cached_reply, message)
+                if violation is not None:
+                    pad = violation.as_log()
+                    log_guard_event("numeric", path="cache", **pad)
+                    with FAQ_CACHE_LOCK:
+                        FAQ_CACHE.pop(cache_key, None)
+                else:
+                    self._chat_ttft = round(time.time() - self._req_start, 2)
+                    self._chat_branch = cached_branch
+                    self._chat_reply = cached_reply
+                    self._chat_out_tok = estimate_tokens(cached_reply)
+                    self._chat_cache_hit = True
+                    SESSIONS.record_turn(token, message, cached_reply, epoch)
+                    self._sse_start()
+                    self._sse_send("delta", json.dumps({"content": cached_reply}, ensure_ascii=False))
+                    if cached_branch:
+                        self._sse_send("branch", json.dumps({"branch": cached_branch}, ensure_ascii=False))
+                    self._sse_send("done", "[DONE]")
+                    # 缓存命中分支在下面的 try/finally 之外，必须自己收尾：终结 chunked 流 + 写日志
+                    try:
+                        self._sse_end()
+                    except OSError:
+                        pass
+                    self._emit_chat_log(token, message)
+                    return  # 不调用扣子
 
         body = {
             "bot_id": COZE_BOT_ID,
@@ -1238,6 +1456,21 @@ class Handler(BaseHTTPRequestHandler):
         structured = None
         pieces: list[str] = []
         reply_text = ""
+        stream_pending = ""
+        guard_stream = NumericGuardStream(message)
+        self._chat_guard_blocked = False
+        self._chat_guard_metric = ""
+        self._chat_guard_value = None
+
+        def emit(text: str) -> None:
+            nonlocal reply_text, sent_delta
+            if not text:
+                return
+            if self._chat_ttft is None:
+                self._chat_ttft = round(time.time() - self._req_start, 2)
+            self._sse_send("delta", json.dumps({"content": text}, ensure_ascii=False))
+            reply_text += text
+            sent_delta = True
 
         for raw in resp:
             line = raw.decode("utf-8", "replace").rstrip("\r\n")
@@ -1289,14 +1522,53 @@ class Handler(BaseHTTPRequestHandler):
                 if structured:
                     pieces.append(piece)
                 else:
-                    if self._chat_ttft is None:
-                        self._chat_ttft = round(time.time() - self._req_start, 2)
-                    self._sse_send("delta", json.dumps({"content": piece}, ensure_ascii=False))
-                    reply_text += piece
-                    sent_delta = True
+                    # 方案 B：标记要等攒齐再判断，先扣住可能是 [[NO_ANSWER]] 前缀的尾部
+                    stream_pending += piece
+                    visible, stream_pending = split_no_answer_stream(stream_pending)
+                    if visible and not sent_delta and not visible.strip():
+                        # 还没发过正文时，纯空白也先留着，避免把「只含标记」误判成已有实质内容
+                        stream_pending = visible + stream_pending
+                        visible = ""
+                    if visible:
+                        for chunk in guard_stream.feed(visible):
+                            emit(chunk)
             else:
                 # 完成事件里带的是整段回复，作为兜底
                 completed_answer = msg.get("content") or completed_answer
+
+        # 收尾：暂缓的尾部按方案 B 规则处理（只含标记 → 兜底话术；夹在实质答复里 → 删标记）
+        if stream_pending:
+            marker = stream_pending.strip()
+            if not sent_delta and marker in NO_ANSWER_REPLIES:
+                tail = NO_ANSWER_REPLIES[marker]
+            elif not sent_delta and GENERIC_PLACEHOLDER_RE.fullmatch(marker):
+                # 未登记的占位符单独出现：不能把空回复丢给用户，按兜底处理
+                log_guard_event("placeholder", markers=[marker], action="fallback")
+                tail = NO_ANSWER_REPLY
+            elif re.fullmatch(r"\[\[[A-Z0-9_]*", marker):
+                # 流结束时仍是半截标记，直接丢弃，避免 "[[ABC" 漏给用户
+                log_guard_event("placeholder", markers=[marker], action="dropped_partial")
+                tail = ""
+            else:
+                tail = stream_pending
+                for m in NO_ANSWER_MARKERS:
+                    tail = tail.replace(m, "")
+                tail = GENERIC_PLACEHOLDER_RE.sub("", tail)
+            for chunk in guard_stream.feed(tail):
+                emit(chunk)
+            stream_pending = ""
+
+        # 没有标点收尾的残留句段也要过一遍守卫，避免漏字或漏拦
+        for chunk in guard_stream.finish():
+            emit(chunk)
+        if guard_stream.blocked:
+            self._chat_guard_blocked = True
+            violation = guard_stream.violation
+            if violation is not None:
+                log = violation.as_log()
+                self._chat_guard_metric = log["metric"]
+                self._chat_guard_value = log["value"]
+                log_guard_event("numeric", path="stream", **log)
 
         if structured:
             reply, branch = self._split_structured(completed_answer or "".join(pieces))
@@ -1304,17 +1576,35 @@ class Handler(BaseHTTPRequestHandler):
                 # 解析失败不能把 JSON 原样丢给用户，给一句明确的提示
                 self._sse_send("error", json.dumps({"message": "回复格式异常，请再发送一次～"}, ensure_ascii=False))
                 return
-            reply_text = reply
-            self._sse_send("delta", json.dumps({"content": reply}, ensure_ascii=False))
-            sent_delta = True
-            if self._chat_ttft is None:
-                self._chat_ttft = round(time.time() - self._req_start, 2)
+            reply_text = replace_no_answer_marker(reply)
+            reply_text, violation = guard_completed_reply(reply_text, message)
+            if violation is not None:
+                self._chat_guard_blocked = True
+                log = violation.as_log()
+                self._chat_guard_metric = log["metric"]
+                self._chat_guard_value = log["value"]
+                log_guard_event("numeric", path="structured", **log)
+            if reply_text:
+                if self._chat_ttft is None:
+                    self._chat_ttft = round(time.time() - self._req_start, 2)
+                self._sse_send("delta", json.dumps({"content": reply_text}, ensure_ascii=False))
+                sent_delta = True
 
         # 极端情况：没有增量（例如只给了完成事件），一次性补发
         if not sent_delta and completed_answer:
-            reply_text = completed_answer
-            self._sse_send("delta", json.dumps({"content": completed_answer}, ensure_ascii=False))
-            sent_delta = True
+            reply_text = replace_no_answer_marker(completed_answer)
+            reply_text, violation = guard_completed_reply(reply_text, message)
+            if violation is not None:
+                self._chat_guard_blocked = True
+                log = violation.as_log()
+                self._chat_guard_metric = log["metric"]
+                self._chat_guard_value = log["value"]
+                log_guard_event("numeric", path="completed", **log)
+            if reply_text:
+                if self._chat_ttft is None:
+                    self._chat_ttft = round(time.time() - self._req_start, 2)
+                self._sse_send("delta", json.dumps({"content": reply_text}, ensure_ascii=False))
+                sent_delta = True
         if conversation_id and not sent_meta:
             self._sse_send("meta", json.dumps({"conversation_id": conversation_id}, ensure_ascii=False))
 
@@ -1450,6 +1740,9 @@ class Handler(BaseHTTPRequestHandler):
             "in_tok": in_tok,
             "out_tok": out_tok,
             "cost": round(cost_yuan, 6),
+            "guard_blocked": bool(getattr(self, "_chat_guard_blocked", False)),
+            "guard_metric": getattr(self, "_chat_guard_metric", "") or "",
+            "guard_value": getattr(self, "_chat_guard_value", None),
         }
         print(json.dumps(rec, ensure_ascii=False))
 

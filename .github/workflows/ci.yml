@@ -23,6 +23,8 @@ jobs:
       - name: 语法检查（py_compile）
         run: |
           python -m py_compile server.py
+          python -m py_compile kb_numeric_guard.py
+          python -m py_compile scripts/gen_kb_numeric_manifest.py
           python -m py_compile eval/run_eval.py
 
       - name: 单元测试
@@ -49,3 +51,7 @@ jobs:
       # G5：简历声明的项目起止月份必须与 git 首个提交一致（投递前也手动跑一次）
       - name: G5 简历日期与 git 一致
         run: python scripts/resume_dates.py
+
+      # G6：数值清单必须与知识库同步；改了知识库数字却没重跑生成脚本时，直接失败并列出差异
+      - name: G6 数值清单与知识库同步
+        run: python scripts/gen_kb_numeric_manifest.py --check

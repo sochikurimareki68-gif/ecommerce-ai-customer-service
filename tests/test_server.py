@@ -902,5 +902,46 @@ class HandoffStatusPageTest(unittest.TestCase):
         self.assertNotIn("POST", restore_block)
 
 
+class FaqCacheTest(unittest.TestCase):
+    """首问缓存只存正常答复：否定性/未命中/占位标记一律跳过，避免坏答案被固化。"""
+
+    def setUp(self):
+        server.FAQ_CACHE.clear()
+
+    def tearDown(self):
+        server.FAQ_CACHE.clear()
+
+    def test_negative_answers_are_not_cached(self):
+        cases = [
+            "亲，目前我这里没有查询到云柔、暖阳相关的在售床品哦，您可以核对下商品名称。",
+            "亲，没有查到这款商品的信息。",
+            "亲，这边暂时没有查到准确资料，正在为您转接人工客服。",
+            "亲，没有相关的在售商品，您可以换个说法试试。",
+            "亲，请核对下商品名称后再问。",
+        ]
+        for reply in cases:
+            with self.subTest(reply=reply[:20]):
+                server.faq_cache_put("q", reply, "商品咨询")
+                self.assertIsNone(server.faq_cache_get("q"))
+
+    def test_placeholder_answers_are_not_cached(self):
+        for reply in ("[[NO_ANSWER]]", "亲，[[NO_ANSWER_INVOICE]]", "[[SOME_NEW_MARKER]]"):
+            with self.subTest(reply=reply):
+                server.faq_cache_put("q", reply, "其他兜底")
+                self.assertIsNone(server.faq_cache_get("q"))
+
+    def test_normal_answer_is_cached(self):
+        reply = "亲，面料为 60支纯棉，柔软透气，性价比高，适合日常使用。"
+        server.faq_cache_put("q", reply, "商品咨询")
+        self.assertEqual(server.faq_cache_get("q"), (reply, "商品咨询"))
+
+    def test_skip_reason_logged_on_put(self):
+        with mock.patch.object(server, "log_guard_event") as log:
+            server.faq_cache_put("q", "亲，没有查到这款商品。", "其他兜底")
+        log.assert_called_once()
+        self.assertEqual(log.call_args[0][0], "cache_skip")
+        self.assertEqual(log.call_args[1]["reason"], "negative")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -796,6 +796,14 @@ class NumericGuardStream:
 FAQ_CACHE: dict[str, tuple[str, str, float]] = {}
 FAQ_CACHE_LOCK = threading.Lock()
 
+# 否定性/未命中类回答不进缓存：这类回答往往只是当次检索没召回，
+# 固化 3600 秒会把一次坏答案反复回放。按语义特征匹配，不写死整句。
+NEGATIVE_ANSWER_RE = re.compile(
+    r"没有(?:查询|查|找到|匹配|检索)到|没有查到|查不到|未找到|"
+    r"没有相关|无相关|暂无(?:相关|匹配|资料)|暂时没有(?:查到|相关|资料)|"
+    r"核对下?商品名称|请(?:您)?核对|换个(?:说法|关键词|问法)"
+)
+
 
 def faq_cache_get(key: str) -> tuple[str, str] | None:
     with FAQ_CACHE_LOCK:
@@ -809,7 +817,24 @@ def faq_cache_get(key: str) -> tuple[str, str] | None:
         return reply, branch
 
 
+def cache_skip_reason(reply: str) -> str:
+    """判断回复是否不适合写缓存；返回原因，空串表示可缓存。"""
+    text = reply or ""
+    if not text.strip():
+        return "empty"
+    if GENERIC_PLACEHOLDER_RE.search(text):
+        return "placeholder"
+    if NEGATIVE_ANSWER_RE.search(text):
+        return "negative"
+    return ""
+
+
 def faq_cache_put(key: str, reply: str, branch: str) -> None:
+    reason = cache_skip_reason(reply)
+    if reason:
+        # 明确记录「跳过写缓存」：与「没命中缓存」区分开，便于线上排查坏答案固化。
+        log_guard_event("cache_skip", reason=reason, reply=(reply or "")[:80])
+        return
     with FAQ_CACHE_LOCK:
         if len(FAQ_CACHE) >= FAQ_CACHE_MAX:
             # 淘汰最早写入的一条

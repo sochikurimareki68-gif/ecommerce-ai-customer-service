@@ -13,7 +13,7 @@
   "_multi_turn_comment": "多轮用例：同一 cookie 会话连发 turns 里的两句，只校验第二轮是否命中 expect_any（证明读懂了上文），由 run_eval.py --multi 执行，结果写入 eval/report-multi.md。",
   "multi_turn_cases": [
     { "id": "M01", "turns": ["天丝床品怎么洗？", "那纯棉的呢？"], "expect_any": ["纯棉", "40"] },
-    { "id": "M02", "turns": ["四件套有什么尺寸？", "1.8 米多少钱？"], "expect_any": ["1.8", "899", "599", "499"] },
+    { "id": "M02", "turns": ["四件套有什么尺寸？", "1.8 米多少钱？"], "expect_any": ["299", "349", "499", "599", "899"] },
     { "id": "M03", "turns": ["我想退货", "运费谁出？"], "expect_any": ["运费", "承担"] },
     { "id": "M04", "turns": ["多久能发货？", "新疆发吗？"], "expect_any": ["新疆", "EMS", "偏远"] },
     { "id": "M05", "turns": ["现在有什么活动？", "能叠加吗？"], "expect_any": ["叠加"] }
@@ -72,7 +72,9 @@
     { "id": "FC09", "input": "满减能和优惠券叠加吗？", "expect_all": ["叠加"], "expect_any": ["满减", "优惠券"], "must_not": ["不能叠加", "不可叠加", "不支持叠加"] },
     { "id": "FC10", "input": "1.8米的四件套多少钱？", "expect_all": ["1.8"], "expect_any": ["299", "349", "459", "599", "899", "价格", "参考"], "must_not": ["免费", "0元", "1999"] },
     { "id": "FC11", "input": "超过承诺时间没发货有补偿吗？", "expect_all": ["补偿"], "expect_any": ["48", "补偿", "券"], "must_not": ["10元", "20元", "50元"] },
-    { "id": "FC12", "input": "床品面料有荧光剂吗？", "expect_all": ["不含"], "expect_any": ["OEKO", "荧光剂"], "must_not": ["含少量", "微量荧光", "有少量"] }
+    { "id": "FC12", "input": "床品面料有荧光剂吗？", "expect_all": ["不含"], "expect_any": ["OEKO", "荧光剂"], "must_not": ["含少量", "微量荧光", "有少量"] },
+    { "id": "FC13", "input": "云柔四件套多少钱？", "expect_all": ["199"], "expect_any": ["259", "299"], "must_not": ["哪款", "没有价格", "查不到"] },
+    { "id": "FC14", "input": "暖阳四件套 1.5 米多少钱？", "expect_all": ["299"], "expect_any": ["1.5"], "must_not": ["哪款", "没有价格", "查不到"] }
   ],
   "cases": [
     { "id": "P01", "expect_branch": "商品咨询", "input": "四件套有哪些尺寸？", "expect_any": ["尺寸", "cm"] },

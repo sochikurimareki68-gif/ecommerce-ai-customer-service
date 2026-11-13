@@ -6,7 +6,7 @@
 > **自动生成事实区** —— 由 `scripts/gen_readme_facts.py` 从代码、数据集与评测报告生成，**请勿手改**；校验命令：`python3 scripts/gen_readme_facts.py --check`。
 >
 > - 版本：v2.0.3（`server.py` 的 `__version__`）
-> - 单元测试：84 条
+> - 单元测试：115 条
 > - 评测用例：单轮 31 / 多轮 5 / 事实 12 / 安全 6 / 记忆 2
 > - 对话流：LLM 节点 1 个、意图域 6 类、节点会话历史 5 轮、智能体上下文 10 轮
 > - 最新评测（v2.0.3，2026-10-25 23:53）：关键信息覆盖率 100.0%、回复规范性 100.0%；分支归属一致率 83.9%（关键词推断，仅供参考、不计入验收）
@@ -91,7 +91,7 @@ ecommerce-ai-customer-service/
 ├── .env.example                # 环境变量示例（复制为 .env 并填写令牌）
 ├── .github/workflows/ci.yml    # CI：语法检查 + 单元测试 + JSON 校验 + 评测脚本 smoke test
 ├── tests/
-│   └── test_server.py          # 后端单元测试（限流 / 会话 / SSE / 防护，50 条）
+│   └── test_server.py          # 后端单元测试（限流 / 会话 / SSE / 防护，79 条）
 ├── LICENSE                     # MIT 许可
 ├── eval/
 │   ├── dataset.json            # 评测数据集（31 条单轮 + 5 组多轮 + 分支关键词）
@@ -101,8 +101,8 @@ ecommerce-ai-customer-service/
 ├── docs/
 │   ├── images/                 # README 界面截图
 │   ├── prompt-template.md      # 人设 Prompt 模板（7个模块）
-│   ├── faq-knowledge-base.md   # FAQ 知识库（50条，6大类）
-│   ├── product-catalog.md      # 商品目录与价格表（20款）
+│   ├── faq-knowledge-base.md   # FAQ 知识库（50条，7大类）
+│   ├── product-catalog.md      # 商品目录与价格表（21款）
 │   ├── chatflow-design.md      # 六路条件判断对话流设计
 │   ├── test-cases.md           # 测试用例设计（25 组设计 + 5 条边界补充 = 30 条执行）
 │   ├── release-checklist.md    # 上线检查清单 + 应急 Runbook（发布 10 项 / 故障分级 / 场景处置 / 回滚 SOP）
@@ -229,7 +229,7 @@ GitHub Pages 只能托管静态文件，跑不了后端，所以**真实对话�
 python3 -m unittest discover -s tests -t . -v
 ```
 
-共 50 条，CI 每次推送都会执行。
+共 115 条，CI 每次推送都会执行。
 
 ## 效果评测（v2.0.3）
 
@@ -295,7 +295,7 @@ python3 eval/run_eval.py --facts       # 跑 12 条事实一致性用例 → eva
 ## 实施步骤
 
 1. 在扣子创建智能体，配置人设 Prompt（角色/语气/处理规则/禁答范围等）
-2. 整理 50 条电商客服 FAQ + 20 款商品目录，上传至知识库
+2. 整理 14 个知识库文件（171 条问答、21 个商品条目），上传至知识库
 3. 创建单节点对话流：单一 LLM 节点（六域合并提示词）→ 结束节点返回文本（流式输出）
 4. 将对话流绑定到智能体，配置消息处理规则与开场白
 5. 测试 25 组设计用例 + 5 条边界补充用例（共 30 条），覆盖六大意图，记录 BadCase 并优化

@@ -7,13 +7,13 @@
     "basis": "简历A版（离职后个人项目），与 git 首个提交 2026-10 对齐"
   },
   "metrics": {
-    "keyword_pct": 96.8,
+    "keyword_pct": 100.0,
     "forbidden_pct": 100.0
   },
   "counts": {
     "single": 31,
     "multi": 5,
-    "facts": 12,
+    "facts": 14,
     "security": 6
   }
 }

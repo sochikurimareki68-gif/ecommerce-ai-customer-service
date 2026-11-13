@@ -104,7 +104,11 @@ _ENTRY_CATEGORY_OVERRIDES: dict[str, tuple[str, ...]] = {
 }
 
 # 这些事实离开品类无法确定归属，没品类词也没商品名时不猜，交回模型。
-_CATEGORY_BOUND_INTENTS = {"price", "size", "material", "wash", "weight", "thread", "feature"}
+# 有品类词时，跨品类通用段落（如 06 不分品类的洗涤参数）也不许顶上来。
+_CATEGORY_BOUND_INTENTS = {
+    "price", "size", "material", "wash", "dry", "iron", "shrink",
+    "weight", "thread", "feature",
+}
 
 # 条目段落关键词：同一意图下优先命中主题更贴的段落。
 _SECTION_HINTS: dict[str, tuple[str, ...]] = {
@@ -301,6 +305,10 @@ def match_fact(message: str, index: dict) -> dict | None:
         if category:
             entry_cats = _entry_categories(entry)
             if entry_cats and category not in entry_cats:
+                continue
+            # 有品类词时，跨品类通用段落不再参与竞争；本品类自己的条目
+            # （02–05 文件内）已由上一步归到该品类，不受影响。
+            if not entry_cats and (intents & _CATEGORY_BOUND_INTENTS):
                 continue
         if product and entry.get("scope") == "product" and not same_product:
             continue

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "generated_from": "upload",
   "file_count": 14,
-  "entry_count": 171,
+  "entry_count": 172,
   "products": [
     {
       "name": "云柔·60支纯棉四件套（基础款）",
@@ -1145,6 +1145,27 @@
       "fallback": "需要与被芯、枕芯搭配的建议，以人工客服确认为准。",
       "metrics": [
         "thread_count",
+        "wash_temp_c"
+      ]
+    },
+    {
+      "id": "02-床品套件#32",
+      "file": "02-床品套件.md",
+      "scope": "category",
+      "category": "套件洗护通用口径",
+      "product": "",
+      "section": "可机洗与洗涤方式",
+      "questions": [
+        "四件套能机洗吗",
+        "套件能不能机洗",
+        "三件套怎么洗"
+      ],
+      "answer": "套件类床品（四件套、三件套、六件套）可以机洗，选轻柔档，水温 ≤30℃，使用中性洗涤剂，不可漂白；洗后自然晾干，避免长时间暴晒。",
+      "conditions": "适用于可水洗的纯棉、长绒棉、天丝套件；被芯、枕芯不属于本条适用范围。",
+      "boundary": "水温 ≤30℃；轻柔档机洗；不可漂白，不可长时间暴晒。",
+      "exception": "磨毛款与法兰绒款按各自洗护条目执行（≤40℃、反面洗涤、忌高温烘干）。",
+      "fallback": "面料成分不明或需处理特殊污渍，以人工客服确认为准。",
+      "metrics": [
         "wash_temp_c"
       ]
     },

@@ -234,6 +234,38 @@ class CategoryBindingTest(unittest.TestCase):
             with self.subTest(message=message):
                 self.assertIsNone(K.match_fact(message, self.index), message)
 
+    def test_generic_sections_do_not_compete_when_category_present(self):
+        """有品类词时，跨品类通用段落不得与品类专属条目抢答；没命中就放给模型。"""
+        cases = [
+            ("02", "四件套能机洗吗"),
+            ("02", "四件套能不能烘干"),
+            ("02", "四件套会掉色吗"),
+            ("03", "被芯水温多少"),
+            ("04", "枕芯能水洗吗"),
+            ("05", "床垫保护套能烘干吗"),
+        ]
+        for expected, message in cases:
+            with self.subTest(message=message):
+                result = K.match_fact(message, self.index)
+                if result is None:
+                    continue
+                entry = result["entry"]
+                cats = K._entry_categories(entry)
+                self.assertTrue(
+                    cats and expected in cats,
+                    f"{message} 命中了通用/别品类条目：{entry['file']} · {entry['section']}",
+                )
+
+    def test_category_wash_entry_answers_machine_wash(self):
+        """02 新增的套件洗护通用条目：机洗口径要完整、不与其他款冲突。"""
+        result = K.match_fact("四件套能机洗吗", self.index)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["entry"]["file"], "02-床品套件.md")
+        self.assertEqual(result["entry"]["section"], "可机洗与洗涤方式")
+        for fragment in ("可以机洗", "轻柔档", "≤30℃", "中性洗涤剂", "不可漂白", "自然晾干"):
+            self.assertIn(fragment, result["reply"], fragment)
+        self.assertIn("磨毛款与法兰绒款按各自洗护条目执行", result["entry"]["exception"])
+
 
 class FactServerIntegrationTest(unittest.TestCase):
     def setUp(self):

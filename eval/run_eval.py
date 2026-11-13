@@ -299,6 +299,8 @@ def run_multi_case(case: dict, base_url: str, forbidden: list[str]) -> dict:
             time.sleep(MULTI_TURN_GAP)
 
     second = replies[1] if len(replies) > 1 else ""
+    all_miss = [w for w in case.get("expect_all", []) if w not in second]
+    must_not_hits = [w for w in case.get("must_not", []) if w in second]
     return {
         "id": case["id"],
         "turns": case["turns"],
@@ -306,7 +308,10 @@ def run_multi_case(case: dict, base_url: str, forbidden: list[str]) -> dict:
         "error": error,
         "reply1": replies[0] if replies else "",
         "reply2": second,
-        "context_hit": bool(second) and any(kw in second for kw in case["expect_any"]),
+        "expect_all_miss": all_miss,
+        "must_not_hits": must_not_hits,
+        "context_hit": bool(second) and any(kw in second for kw in case["expect_any"])
+        and not all_miss and not must_not_hits,
         "forbidden_hits": [w for w in forbidden if w in second],
         "elapsed2": latencies[1] if len(latencies) > 1 else 0,
         "ttft2": ttfts[1] if len(ttfts) > 1 else 0,
@@ -357,14 +362,15 @@ def write_multi_report(meta: dict, s: dict, results: list[dict]) -> None:
 
     a("## 二、逐组明细")
     a("")
-    a("| ID | 第一句 | 第二句 | 上下文命中 | 规范性 | 第二轮用时 | 首字时间 | 第二轮回复摘要 |")
-    a("|----|-------|-------|-----------|-------|-----------|---------|--------------|")
+    a("| ID | 第一句 | 第二句 | 上下文命中 | 规范性 | 禁用词 | 第二轮用时 | 首字时间 | 第二轮回复摘要 |")
+    a("|----|-------|-------|-----------|-------|-------|-----------|---------|--------------|")
     for r in results:
         ctx = "✅" if r["context_hit"] else "❌"
         clean = "✅" if (r["ok"] and not r["forbidden_hits"]) else "❌"
+        bad = "、".join(r["must_not_hits"]) or "—"
         summary = (r["reply2"] or r["error"] or "—")[:60]
         a(f"| {r['id']} | {md_cell(r['turns'][0])} | {md_cell(r['turns'][1])} | {ctx} | {clean} "
-          f"| {r['elapsed2']}s | {r['ttft2']}s | {md_cell(summary)} |")
+          f"| {md_cell(bad)} | {r['elapsed2']}s | {r['ttft2']}s | {md_cell(summary)} |")
     a("")
 
     a("## 三、方法与局限")
@@ -372,9 +378,13 @@ def write_multi_report(meta: dict, s: dict, results: list[dict]) -> None:
     a("- **会话保持**：每组新建一个 `CookieJar`，同一组两句复用同一个 HttpOnly Cookie，"
       "服务端据此把第二轮接到同一个 `conversation_id` 上。")
     a(f"- **节奏**：组内两句之间、以及相邻两组之间均间隔 {MULTI_TURN_GAP} 秒，避开「单 IP 每分钟 6 次」限流。")
-    a("- **判定**：只看第二轮是否命中该组预设关键词（如「那纯棉的呢」必须答纯棉洗护）；第一轮只作上下文铺垫，不单独计分。")
-    a("- **局限**：关键词只能证明「还在同一条业务线上」，不能证明指代完全正确"
-      "（例如把「1.8 米」错认成「1.5 米」时，只要出现价格仍会判过）。更严格的做法是把断言写成多关键词组合或人工抽检。")
+    a("- **判定**：第二轮必须命中 `expect_any` 其一、`expect_all` 全部，且不得出现 `must_not` 任一词，才判上下文通过；"
+      "只命中关键词、但数值或口径答反的，判失败。")
+    a("- **编写要求**：新增或修改用例必须同时写 must（`expect_all` / `expect_any`）和 `must_not`，缺一不可。"
+      "v2.0.5 的 M02 用「299/349/499/599/899 命中其一」的软断言，模型把暖阳 1.8m 报成 399 仍判通过；"
+      "M05 只校验「叠加」二字，答成「不支持叠加」也判通过——两处都是断言太松导致的假通过。")
+    a("- **局限**：关键词仍只能证明关键事实出现，不能证明整段表述都正确；"
+      "`must_not` 只能覆盖已知错误值。新增用例时应同时写正反两类断言，并配合人工抽检。")
     a("- **失败排查**：某组第二轮答偏时，先确认对应节点的「会话历史」是否开启、对话流与智能体是否都已发布。")
     a("")
 

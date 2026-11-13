@@ -1,5 +1,6 @@
 {
   "_comment": "项目一 v1.3 效果评测数据集。expect_branch 是期望命中的对话流分支；expect_any 是回复中至少应出现其一的关键词（用于校验内容是否答到点上）。",
+  "_assertion_rule": "新增或修改用例必须同时写 must（expect_all / expect_any）和 must_not，缺一不可。只写命中词、不写禁止项，会把「答到关键词但数值或口径答反」判成通过——v2.0.5 的 M02（命中 599 却把暖阳 1.8m 报成 399）和 M05（命中「叠加」却答成「不支持叠加」）就是这样假通过的。must_not 至少覆盖两类：知识库里明确错误的数值，以及与该问题正确答案相反的口径。",
   "_branch_keywords_comment": "用于从回复文本反推实际走了哪条分支（因为对话流的分类结果不对外暴露）。命中数最多者判为该分支。",
   "branch_keywords": {
     "商品咨询": ["尺寸", "被套", "床单", "枕", "材质", "面料", "规格", "克重", "支数", "颜色", "款式", "推荐", "套件"],
@@ -10,13 +11,13 @@
     "其他兜底": ["正在为您转接", "欢迎来到优眠家居", "回答不了", "帮不了", "议价", "智能客服小助手", "转接人工"]
   },
   "forbidden": ["<parameter", "我是人工客服", "```", "<function", "user_message"],
-  "_multi_turn_comment": "多轮用例：同一 cookie 会话连发 turns 里的两句，只校验第二轮是否命中 expect_any（证明读懂了上文），由 run_eval.py --multi 执行，结果写入 eval/report-multi.md。",
+  "_multi_turn_comment": "多轮用例：同一 cookie 会话连发 turns 里的两句，第二轮必须命中 expect_any 其一、expect_all 全部，且不得出现 must_not 任一词，才判上下文通过；由 run_eval.py --multi 执行，结果写入 eval/report-multi.md。新增用例必须按 _assertion_rule 同时写 must 与 must_not。",
   "multi_turn_cases": [
     { "id": "M01", "turns": ["天丝床品怎么洗？", "那纯棉的呢？"], "expect_any": ["纯棉", "40"] },
-    { "id": "M02", "turns": ["四件套有什么尺寸？", "1.8 米多少钱？"], "expect_any": ["299", "349", "499", "599", "899"] },
+    { "id": "M02", "turns": ["四件套有什么尺寸？", "1.8 米多少钱？"], "expect_all": ["299", "349"], "expect_any": ["299"], "must_not": ["399", "459"] },
     { "id": "M03", "turns": ["我想退货", "运费谁出？"], "expect_any": ["运费", "承担"] },
     { "id": "M04", "turns": ["多久能发货？", "新疆发吗？"], "expect_any": ["新疆", "EMS", "偏远"] },
-    { "id": "M05", "turns": ["现在有什么活动？", "能叠加吗？"], "expect_any": ["叠加"] }
+    { "id": "M05", "turns": ["现在有什么活动？", "能叠加吗？"], "expect_any": ["叠加"], "must_not": ["不支持叠加", "不可叠加", "不能叠加"] }
   ],
   "_memory_comment": "记忆回归用例（M-4）：同一会话连发 6 句，第 1 句埋关键信息、中间 4 句干扰、第 6 句追问。判定：命中 expect_any 且无编造=答对；明确说没记住=达标；出现 must_not 或错误数字=编造，既没答对也没说没记住=跑题，后两种判失败。digit_width 用于自动揪出编造的数字。由 run_eval.py --memory 执行，结果写入 eval/report-memory.md。",
   "memory_cases": [

@@ -96,7 +96,7 @@ _ENTRY_CATEGORY_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("05", ("床垫保护套", "床笠", "保护套")),
     ("04", ("枕芯", "枕头", "枕高", "睡姿")),
     ("03", ("被芯", "被子", "羽绒被", "蚕丝被", "夏凉被", "子母被")),
-    ("02", ("四件套", "套件", "床单", "被套", "床裙")),
+    ("02", ("四件套", "套件", "床单", "被套", "床裙", "纯棉", "磨毛", "法兰绒", "天丝")),
 )
 
 # 段落标题本身横跨多个品类时，按标题而不是关键词归属，避免被误判成单品类。
@@ -395,6 +395,15 @@ def match_fact(message: str, index: dict) -> dict | None:
             continue
 
         same_product = bool(product and entry.get("product") == product.get("name"))
+        # 价格速查表按「一行一款」跨品类汇总，条目本身不绑定单个商品；
+        # 只要答复里点到了所问商品，就按本品条目同等对待，避免让参数条目抢先。
+        product_name = (product or {}).get("name") or ""
+        short_name = re.split(r"[·（(]", product_name)[0]
+        product_in_answer = bool(
+            product and len(short_name) >= 2
+            and short_name in normalize(entry.get("answer") or "")
+        )
+        same_subject = same_product or product_in_answer
         section = entry.get("section") or ""
         if any(word in section for word in _NON_FACT_SECTIONS):
             continue
@@ -438,15 +447,24 @@ def match_fact(message: str, index: dict) -> dict | None:
             for intent in shared
             for word in INTENT_WORDS.get(intent, ())
         )
-        if (not same_product and cov < 0.34 and not section_word_hit
+        if (not same_subject and cov < 0.34 and not section_word_hit
                 and not deadline_hit and not answer_word_hit):
             continue
 
-        score = 10.0 * len(shared) + (12.0 if same_product else 0.0) + 30.0 * cov
+        score = 10.0 * len(shared) + (12.0 if same_subject else 0.0) + 30.0 * cov
+        # 问价时，答复里没有具体金额的条目让位给价格速查表。
+        if "price" in shared and "¥" not in (entry.get("answer") or ""):
+            score -= 15.0
         # 已知商品时，别品类的通用段落要让位给本品类原文。
-        if product and entry.get("scope") == "category" and entry.get("file") != product.get("file"):
+        if (product and entry.get("scope") == "category"
+                and entry.get("file") != product.get("file")
+                and not product_in_answer):
             score -= 12.0
         if category and (entry.get("file") or "").startswith(category):
+            score += 8.0
+        # 价格速查表是唯一价格出处：问价时让它与本品类的参数条目同权，
+        # 避免「1.8 米有标价吗」这类问法被相邻的规格条目以微弱分差盖过。
+        if "price" in shared and (entry.get("file") or "").startswith("14-"):
             score += 8.0
         for intent in shared:
             hints = _SECTION_HINTS.get(intent) or ()

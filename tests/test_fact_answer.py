@@ -57,7 +57,7 @@ class FactMatchTest(unittest.TestCase):
 
     def test_wash_temperature_hits_product_entry(self):
         entry = self.hit("法兰绒四件套怎么洗")["entry"]
-        self.assertEqual(entry["file"], "02-床品套件.md")
+        self.assertEqual(entry["file"], "06-洗护与保养.md")
 
     def test_shipping_time_uses_48_hours(self):
         reply = self.hit("多久发货")["reply"]
@@ -135,10 +135,10 @@ class FactMatchTest(unittest.TestCase):
         self.assertEqual(entry["file"], "07-物流与发货.md")
         self.assertIn("人工客服", entry["answer"])
 
-    def test_price_with_size_phrase_hits_same_product_entry(self):
-        """同一商品两个相邻段落分差小，不能误判歧义放掉。"""
+    def test_price_with_size_phrase_hits_price_table(self):
+        """价格统一收在 14-价格速查，按一行一款报价，不再由参数段复述。"""
         entry = self.hit("暖阳1.5m有标价吗")["entry"]
-        self.assertEqual(entry["product"], "暖阳·磨毛纯棉四件套（秋冬款）")
+        self.assertEqual(entry["file"], "14-价格速查.md")
         self.assertIn("¥299", entry["answer"])
 
     def test_comparison_and_purchase_advice_are_not_intercepted(self):
@@ -194,10 +194,10 @@ class CategoryBindingTest(unittest.TestCase):
         self.assertEqual(found[("06-洗护与保养.md", "被芯的清洁方式")], {"03"})
         self.assertEqual(found[("06-洗护与保养.md", "枕芯的清洁方式")], {"04"})
         self.assertEqual(found[("06-洗护与保养.md", "床单被套的清洗频率")], {"02"})
-        self.assertEqual(found[("14-选购知识.md", "被芯尺寸与床宽匹配")], {"03"})
-        self.assertEqual(found[("14-选购知识.md", "枕芯尺寸与枕套匹配")], {"04"})
+        self.assertEqual(found[("03-被芯系列.md", "被芯尺寸与床宽匹配")], {"03"})
+        self.assertEqual(found[("04-枕芯系列.md", "枕芯尺寸与枕套匹配")], {"04"})
         self.assertEqual(found[("01-品牌认证与规格.md", "四件套尺寸对照")], {"02"})
-        self.assertEqual(found[("06-洗护与保养.md", "纯棉床品的洗涤参数")], set())
+        self.assertEqual(found[("06-洗护与保养.md", "纯棉床品的洗涤参数")], {"02"})
 
     def test_four_categories_never_return_another_category(self):
         """四品类 × 洗护/价格/尺寸/材质 全量问法：命中只能是本品类或通用条目。"""
@@ -250,7 +250,7 @@ class CategoryBindingTest(unittest.TestCase):
             "四件套有1.8米的吗": "四件套尺寸对照",
             "枕芯尺寸多大": "枕芯尺寸与枕套匹配",
             "被芯尺寸多大": "被芯尺寸与床宽匹配",
-            "床垫保护套有1.8米的吗": "按床型选规格与价格对照",
+            "床垫保护套有1.8米的吗": "三款床垫保护套规格价",
             "被芯能机洗吗": "被芯的清洁方式",
             "枕芯能机洗吗": "枕芯的清洁方式",
         }
@@ -289,20 +289,19 @@ class CategoryBindingTest(unittest.TestCase):
                 )
 
     def test_category_wash_entry_answers_machine_wash(self):
-        """02 新增的套件洗护通用条目：机洗口径要完整、不与其他款冲突。"""
+        """洗护统一收在 06：机洗口径按面料给，纯棉 ≤40℃。"""
         result = K.match_fact("四件套能机洗吗", self.index)
         self.assertIsNotNone(result)
-        self.assertEqual(result["entry"]["file"], "02-床品套件.md")
-        self.assertEqual(result["entry"]["section"], "可机洗与洗涤方式")
-        for fragment in ("可以机洗", "轻柔档", "≤30℃", "中性洗涤剂", "不可漂白", "自然晾干"):
+        self.assertEqual(result["entry"]["file"], "06-洗护与保养.md")
+        self.assertEqual(result["entry"]["section"], "纯棉床品的洗涤参数")
+        for fragment in ("可以机洗", "轻柔模式", "40 度", "中性洗涤剂", "禁止漂白剂", "自然晾干"):
             self.assertIn(fragment, result["reply"], fragment)
-        self.assertIn("磨毛款与法兰绒款按各自洗护条目执行", result["entry"]["exception"])
 
     def test_drying_question_is_answered_by_category_entry(self):
-        """「能不能烘干」要落到套件条目并正面回答，不能只讲机洗。"""
+        """「能不能烘干」要落到洗护条目并正面回答，不能只讲机洗。"""
         result = K.match_fact("四件套能不能烘干", self.index)
         self.assertIsNotNone(result)
-        self.assertEqual(result["entry"]["file"], "02-床品套件.md")
+        self.assertEqual(result["entry"]["file"], "06-洗护与保养.md")
         self.assertIn("不建议高温烘干", result["reply"])
         self.assertIn("低温烘干或自然晾干", result["reply"])
 
@@ -310,11 +309,11 @@ class CategoryBindingTest(unittest.TestCase):
         """水洗 / 能不能洗 / 可以洗吗 这类口语问法也要进洗护意图。"""
         cases = {
             "枕芯能水洗吗": ("06-洗护与保养.md", "枕芯的清洁方式"),
-            "四件套能不能洗": ("02-床品套件.md", "可机洗与洗涤方式"),
-            "云柔四件套可以洗吗": ("02-床品套件.md", "可机洗与洗涤方式"),
-            "四件套可水洗吗": ("02-床品套件.md", "可机洗与洗涤方式"),
+            "四件套能不能洗": ("06-洗护与保养.md", "纯棉床品的洗涤参数"),
+            "云柔四件套可以洗吗": ("06-洗护与保养.md", "纯棉床品的洗涤参数"),
+            "四件套可水洗吗": ("06-洗护与保养.md", "纯棉床品的洗涤参数"),
             "被芯可以洗吗": ("06-洗护与保养.md", "被芯的清洁方式"),
-            "床垫保护套能水洗吗": ("05-床垫保护套系列.md", "机洗、水温与烘干"),
+            "床垫保护套能水洗吗": ("06-洗护与保养.md", "床垫保护套的洗涤方式"),
         }
         for message, (file, section) in cases.items():
             with self.subTest(message=message):
@@ -465,7 +464,7 @@ class AskCoverageTest(unittest.TestCase):
     def test_matched_answer_is_verbatim_for_stack(self):
         result = K.match_fact("满减能和优惠券叠加吗？", self.index)
         self.assertIsNotNone(result)
-        self.assertIn("满减活动与优惠券可以叠加", result["reply"])
+        self.assertIn("满减与优惠券可以叠加", result["reply"])
 
 
 if __name__ == "__main__":

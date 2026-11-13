@@ -224,6 +224,56 @@ def _finalize_metrics(bucket: dict) -> dict:
     }
 
 
+def _apply_price_table(categories: list[dict], upload_dir: Path) -> None:
+    """价格速查表是全品类价格的唯一出处，按小节把价位补回对应品类。
+
+    价格表单独成一个文件（14），若只按文件名归属，02-05 品类的价位集合会变空，
+    数值守卫就失去拦串价的能力，因此这里按小节标题把价位回填到 02-05。
+    """
+    path = upload_dir / "14-价格速查.md"
+    if not path.exists():
+        return
+    by_id = {category["id"]: category for category in categories}
+    rules = (
+        (("套件",), ("02",)),
+        (("被芯",), ("03",)),
+        (("枕芯",), ("04",)),
+        (("保护套",), ("05",)),
+        (("报价口径",), ("02", "03", "04", "05")),
+    )
+    values: dict[str, set[float]] = {}
+    samples: dict[str, list[str]] = {}
+    heading = ""
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line.startswith("## "):
+            heading = line[3:]
+            continue
+        if not re.match(r"-\s*答复[：:]", line):
+            continue
+        targets = next((ids for words, ids in rules if any(w in heading for w in words)), ())
+        if not targets:
+            continue
+        claims = [c for c in extract_claims(line) if c.key == "price_cny"]
+        if not claims:
+            continue
+        for cat_id in targets:
+            if cat_id not in by_id:
+                continue
+            bucket = values.setdefault(cat_id, set())
+            for claim in claims:
+                bucket.update(float(v) for v in claim.numbers)
+            kept = samples.setdefault(cat_id, [])
+            if len(kept) < 3 and line[:120] not in kept:
+                kept.append(line[:120])
+    for cat_id, nums in values.items():
+        metrics = by_id[cat_id]["shared_metrics"]
+        metric = metrics.setdefault("price_cny", {"values": [], "samples": []})
+        merged = {float(v) for v in metric["values"]} | nums
+        metric["values"] = sorted(_display_number(v) for v in merged)
+        metric["samples"] = (metric["samples"] + samples.get(cat_id, []))[:3]
+
+
 def build_manifest(upload_dir: Path) -> dict:
     """从知识库目录生成清单（不读网络，不依赖第三方库）。"""
     files = sorted(upload_dir.glob("*.md"))
@@ -292,6 +342,8 @@ def build_manifest(upload_dir: Path) -> dict:
                     aliases.append(alias)
         category["aliases"] = aliases
         categories.append(category)
+
+    _apply_price_table(categories, upload_dir)
 
     return {
         "schema_version": MANIFEST_SCHEMA_VERSION,

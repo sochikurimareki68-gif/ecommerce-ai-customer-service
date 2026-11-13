@@ -67,7 +67,8 @@ class ManifestCheckTest(unittest.TestCase):
     def test_changed_value_reports_file_and_values(self):
         stale = json.loads(json.dumps(self.manifest))
         category = next(cat for cat in stale["categories"] if cat["id"] == "05")
-        category["shared_metrics"]["wash_temp_c"]["values"] = [30, 40]
+        product = next(p for p in category["products"] if "纯棉防水" in p["name"])
+        product["metrics"]["wash_temp_c"]["values"] = [30, 40]
         lines = gen_manifest.diff_manifest(stale, self.manifest)
         self.assertTrue(
             any(
@@ -109,8 +110,9 @@ class FindViolationTest(unittest.TestCase):
     def test_blocks_wrong_price(self):
         self.assert_blocked("床垫保护套 1.5 米 ¥149。", "床垫保护套多少钱", "price_cny", 149)
 
-    def test_product_price_is_scoped(self):
-        self.assert_blocked("暖阳四件套 1.5m ¥259。", "暖阳多少钱", "price_cny", 259)
+    def test_price_is_scoped_to_category(self):
+        """价格表按品类回填：非本品类价位要拦，本品类价位要放。"""
+        self.assert_blocked("暖阳四件套 1.5m ¥149。", "暖阳多少钱", "price_cny", 149)
         self.assertIsNone(find_violation(
             "暖阳四件套 1.5m ¥299。", "暖阳多少钱", self.manifest
         ))

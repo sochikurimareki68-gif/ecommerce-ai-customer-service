@@ -39,7 +39,7 @@ class FactIndexTest(unittest.TestCase):
     def test_index_covers_all_files_and_entries(self):
         self.assertEqual(self.index["file_count"], 14)
         self.assertEqual(len(self.index["entries"]), self.index["entry_count"])
-        self.assertEqual(self.index["entry_count"], 173)
+        self.assertEqual(self.index["entry_count"], 165)
         self.assertEqual(len(self.index["products"]), 21)
 
     def test_every_answer_is_verbatim_in_source_file(self):

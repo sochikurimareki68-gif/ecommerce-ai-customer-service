@@ -8,7 +8,7 @@
   · 版本号        ← server.py 的 __version__
   · 单元测试条数  ← unittest 发现结果
   · 评测用例条数  ← eval/dataset.json
-  · 架构参数      ← docs/architecture-facts.json（LLM 节点数 / 意图域 / 上下文轮数）
+  · 架构参数      ← docs/architecture-facts.json（检索 LLM 节点数 / 意图域 / 上下文轮数）
   · 最新评测指标  ← eval/report.json（G3 的单一真源）
   · health 字段   ← 真的起一个本地服务打一次 /api/health
 
@@ -104,7 +104,8 @@ def build_block() -> str:
         f"> - 评测用例：单轮 {counts.get('single', len(data.get('cases', [])))} / "
         f"多轮 {counts.get('multi', 0)} / 事实 {counts.get('facts', 0)} / "
         f"安全 {counts.get('security', 0)} / 记忆 {counts.get('memory', 0)}",
-        f"> - 对话流：LLM 节点 {arch['llm_nodes']} 个、意图域 {arch['intent_domains']} 类、"
+        f"> - 对话流：意图识别 → 检索 LLM 节点 {arch['llm_nodes']} 个"
+        f"（{arch['intent_domains']} 类提示词共用同一份公共基座）→ 变量聚合、"
         f"节点会话历史 {arch['history_rounds']} 轮、智能体上下文 {arch['agent_context_rounds']} 轮",
         f"> - 最新评测（v{report.get('version', '')}，{report.get('time', '')}）："
         f"关键信息覆盖率 {metrics.get('keyword_pct', 0):.1f}%、"

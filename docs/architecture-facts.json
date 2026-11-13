@@ -1,7 +1,7 @@
 {
-  "_comment": "架构参数唯一来源：README 事实区（G4）从这里读取；节点数/意图域/上下文轮数变更时同步改这里",
-  "llm_nodes": 1,
-  "intent_domains": 6,
+  "_comment": "架构参数唯一来源：README 事实区（G4）从这里读取；节点数/意图域/上下文轮数变更时同步改这里。当前为方案 B：意图识别 + 五个检索类 LLM 节点 + 变量聚合",
+  "llm_nodes": 5,
+  "intent_domains": 5,
   "history_rounds": 5,
   "agent_context_rounds": 10
 }

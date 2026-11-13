@@ -72,7 +72,7 @@ def load_dotenv(path: Path) -> None:
 load_dotenv(ROOT / ".env")
 
 COZE_API_BASE = os.environ.get("COZE_API_BASE", "https://api.coze.cn").rstrip("/")
-COZE_BOT_ID = os.environ.get("COZE_BOT_ID", "7694865098007035940").strip()
+COZE_BOT_ID = os.environ.get("COZE_BOT_ID", "7706539492081270810").strip()
 COZE_API_TOKEN = os.environ.get("COZE_API_TOKEN", "").strip()
 PORT = int(os.environ.get("PORT", "3000"))
 HOST = os.environ.get("HOST", "0.0.0.0")
@@ -113,6 +113,10 @@ FAQ_CACHE_MAX = int(os.environ.get("FAQ_CACHE_MAX", "200"))
 FAQ_CACHE_ENABLED = os.environ.get("FAQ_CACHE_ENABLED", "1").strip().lower() not in (
     "0", "false", "no", "off",
 )
+# 静态文件白名单：只服务前端资源，其余（.py / .md / .json / .yml / 目录）一律 404
+STATIC_EXTENSIONS = {
+    ".html", ".css", ".js", ".svg", ".png", ".jpg", ".jpeg", ".ico", ".webp", ".woff2", ".map",
+}
 
 # 数值守卫：默认开启，NUMERIC_GUARD_ENABLED=0 可单独关闭灰度。
 NUMERIC_GUARD_ENABLED = os.environ.get("NUMERIC_GUARD_ENABLED", "1").strip().lower() not in (
@@ -915,6 +919,7 @@ def faq_cache_put(key: str, reply: str, branch: str) -> None:
 PENDING_HANDOFF: dict[str, dict] = {}
 PENDING_HANDOFF_LOCK = threading.Lock()
 PENDING_HANDOFF_MAX = 200          # 队列上限，防内存泄漏
+HANDOFF_MESSAGES_MAX = 30          # 单个工单保留的消息条数上限，防单会话无限增长
 
 def _handoff_position_locked(session_id: str) -> int:
     """调用方必须持有 PENDING_HANDOFF_LOCK。返回 1 起的排位，0 表示不在队列。"""
@@ -942,7 +947,7 @@ def record_handoff(session_id: str, user_ip: str, last_reply: str,
             PENDING_HANDOFF[session_id] = {
                 "ts": time.time(),
                 "user_ip_hash": _hash_for_log(user_ip),
-                "messages": list(messages),        # 浅拷贝，防止后续修改
+                "messages": list(messages)[-HANDOFF_MESSAGES_MAX:],  # 浅拷贝并封顶
                 "last_reply": last_reply,
                 "resolved": False,
             }
@@ -971,6 +976,9 @@ def append_handoff_message(session_id: str, text: str, user_ip: str) -> int:
                 "resolved": False,
             }
         entry["messages"].append({"role": "user", "text": text, "ts": now})
+        # 只保留最近 N 条：转人工分支不占提问额度，不封顶会被循环脚本撑爆内存
+        if len(entry["messages"]) > HANDOFF_MESSAGES_MAX:
+            del entry["messages"][:-HANDOFF_MESSAGES_MAX]
         return _handoff_position_locked(session_id)
 
 # 日志里不能存明文 IP / 会话 token，统一截断成短哈希，够定位同一会话即可。
@@ -990,18 +998,20 @@ class Handler(BaseHTTPRequestHandler):
     # ------------------------------------------------------------------
     # 基础响应工具
     # ------------------------------------------------------------------
-    def _send_json(self, status: int, obj: dict) -> None:
+    def _send_json(self, status: int, obj: dict, extra_headers: dict | None = None) -> None:
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for key, value in (extra_headers or {}).items():
+            self.send_header(key, value)
         if self._pending_cookie:
             self.send_header("Set-Cookie", self._pending_cookie)
         self.end_headers()
         self.wfile.write(body)
 
-    def _reject(self, status: int, error: str) -> None:
+    def _reject(self, status: int, error: str, extra_headers: dict | None = None) -> None:
         """提前拒绝请求 —— 必须断开连接。
 
         这些分支在读取请求体之前就返回了。如果保持长连接，没读完的 body 会
@@ -1009,7 +1019,7 @@ class Handler(BaseHTTPRequestHandler):
         后端连接，于是后续请求全部损坏（实测报 "Bad request syntax"）。
         """
         self.close_connection = True
-        self._send_json(status, {"error": error})
+        self._send_json(status, {"error": error}, extra_headers=extra_headers)
 
     # SSE 用 chunked 编码逐块下发，保证前端能实时看到文字
     def _sse_start(self) -> None:
@@ -1180,6 +1190,11 @@ class Handler(BaseHTTPRequestHandler):
             return
         if target.is_dir():
             target = target / "index.html"
+        # 只把前端资源当静态文件服务：白名单而非黑名单，否则 server.py / tests/ /
+        # data/kb_fact_index.json / eval/ 这些工程文件都能被直接下载。
+        if target.suffix.lower() not in STATIC_EXTENSIONS:
+            self._send_json(404, {"error": "not found"})
+            return
         if not target.is_file():
             self._send_json(404, {"error": "not found"})
             return
@@ -1193,6 +1208,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(data)
 
@@ -1215,7 +1231,11 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = 0
-        if 0 < length <= MAX_BODY_BYTES:
+        if length > MAX_BODY_BYTES:
+            # 超限 body 不读就无法保持连接，交给 _reject 回应并断开
+            self._reject(413, "请求体过大")
+            return
+        if length > 0:
             self.rfile.read(length)
 
         token, _, _, _ = SESSIONS.resolve(self._read_cookie(SESSION_COOKIE))
@@ -1313,7 +1333,14 @@ class Handler(BaseHTTPRequestHandler):
             self._reject(400, "请求体必须是合法 JSON")
             return
 
-        sid = data.get("session_id", "").strip()
+        if not isinstance(data, dict):
+            self._reject(400, "请求体必须是 JSON 对象")
+            return
+        raw_sid = data.get("session_id", "")
+        if not isinstance(raw_sid, str):
+            self._reject(400, "session_id 必须是字符串")
+            return
+        sid = raw_sid.strip()
         if not sid:
             self._reject(400, "缺少 session_id")
             return
@@ -1405,6 +1432,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length") or 0)
             if length > MAX_BODY_BYTES:
+                # 不读的超限 body 会残留在 keep-alive 连接上，污染下一个请求
                 self._reject(413, "请求体过大")
                 return
             payload = json.loads(self.rfile.read(length) or b"{}")
@@ -1412,7 +1440,16 @@ class Handler(BaseHTTPRequestHandler):
             self._reject(400, "请求体不是合法 JSON")
             return
 
-        message = (payload.get("message") or "").strip()
+        # 合法 JSON 但类型不对（[] / "x" / {"message": 123}）必须给 400，
+        # 否则 .get / .strip 抛 AttributeError，连接被直接掐断、前端拿不到任何响应。
+        if not isinstance(payload, dict):
+            self._reject(400, "请求体必须是 JSON 对象")
+            return
+        raw_message = payload.get("message")
+        if not isinstance(raw_message, str):
+            self._reject(400, "message 必须是字符串")
+            return
+        message = raw_message.strip()
         if not message:
             self._send_json(400, {"error": "message 不能为空"})
             return
@@ -1435,10 +1472,10 @@ class Handler(BaseHTTPRequestHandler):
         # ---- 第 2、3 层防护：限流（转人工消息不消耗模型额度，故放在其后）----
         allowed, reason = LIMITER.check(self._client_ip())
         if not allowed:
-            self._reject(429, reason)
+            self._reject(429, reason, extra_headers={"Retry-After": "60"})
             return
         if not COZE_API_TOKEN:
-            self._reject(500, "服务端未配置 COZE_API_TOKEN，请先在 .env 中填写")
+            self._reject(503, "服务端未配置 COZE_API_TOKEN，请先在 .env 中填写")
             return
 
         # ---- 确定性回答层（L1）：结构化事实直接查本地索引，命中即返回，不调用扣子 ----

@@ -13,6 +13,9 @@ services:
     startCommand: python server.py  # server.py 会读取环境变量 PORT 并监听 0.0.0.0
     healthCheckPath: /api/health
     envVars:
+      # Python 默认按块缓冲 stdout，容器里日志会攒着不刷出，出事时看不到现场。
+      - key: PYTHONUNBUFFERED
+        value: "1"
       # 令牌只填在 Render 控制台，不写进代码、不提交仓库
       - key: COZE_API_TOKEN
         sync: false

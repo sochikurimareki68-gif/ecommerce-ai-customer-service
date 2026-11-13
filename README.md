@@ -6,7 +6,7 @@
 > **自动生成事实区** —— 由 `scripts/gen_readme_facts.py` 从代码、数据集与评测报告生成，**请勿手改**；校验命令：`python3 scripts/gen_readme_facts.py --check`。
 >
 > - 版本：v2.0.3（`server.py` 的 `__version__`）
-> - 单元测试：164 条
+> - 单元测试：171 条
 > - 评测用例：单轮 31 / 多轮 5 / 事实 12 / 安全 6 / 记忆 2
 > - 对话流：意图识别 → 检索 LLM 节点 5 个（5 类提示词共用同一份公共基座）→ 变量聚合、节点会话历史 5 轮、智能体上下文 10 轮
 > - 最新评测（v2.0.3，2026-10-25 23:53）：关键信息覆盖率 100.0%、回复规范性 100.0%；分支归属一致率 83.9%（关键词推断，仅供参考、不计入验收）
@@ -101,8 +101,8 @@ ecommerce-ai-customer-service/
 ├── .env.example                # 环境变量示例（复制为 .env 并填写令牌）
 ├── .github/workflows/ci.yml    # CI：语法检查 + 单元测试 + JSON 校验 + 评测脚本 smoke test
 ├── tests/
-│   ├── test_server.py          # 后端单元测试（限流 / 会话 / SSE / 防护，79 条）
-│   ├── test_fact_answer.py     # 确定性查表层与兜底（23 条）
+│   ├── test_server.py          # 后端单元测试（限流 / 会话 / SSE / 防护，92 条）
+│   ├── test_fact_answer.py     # 确定性查表层与兜底（37 条）
 │   ├── test_fact_index.py      # 事实索引完整性与原文保真（6 条）
 │   ├── test_numeric_guard.py   # 数值守卫（31 条）
 │   └── test_gates.py           # CI 门禁（5 条）
@@ -143,7 +143,7 @@ open http://localhost:3000       # macOS
 
 `server.py` 承担三件事：托管静态页面、提供 `POST /api/chat`（先查本地事实索引，未命中再流式转发扣子）、对上游空回复与标记做兜底替换。
 另有 `POST /api/reset`：清空当前会话（丢弃 `conversation_id` 并让会话世代 +1），供页面右上角「清空对话」使用。
-`GET /api/health` 单独限流（默认单 IP 每分钟 30 次），不占提问额度，供前端重连与后续定时探活使用。
+`GET /api/health` 单独限流（默认单 IP 每分钟 120 次），不占提问额度，供前端重连与后续定时探活使用。
 页面加载时会探测 `/api/health`——探测成功走真实对话，失败（例如部署在 GitHub Pages）则自动降级为内置模拟回复的界面演示。
 
 ### 为什么需要后端代理
@@ -161,7 +161,7 @@ open http://localhost:3000       # macOS
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `COZE_API_TOKEN` | （空） | 扣子个人访问令牌，必填 |
-| `COZE_BOT_ID` | `7694865098007035940` | 智能体 ID |
+| `COZE_BOT_ID` | `7706539492081270810` | 智能体 ID |
 | `COZE_API_BASE` | `https://api.coze.cn` | 接口域名（国际版用 `https://api.coze.com`） |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | 监听端口与地址 |
 | `MAX_BODY_BYTES` | `16384` | 单次请求体上限（字节）；上线建议 `4096` |
@@ -170,6 +170,7 @@ open http://localhost:3000       # macOS
 | `IP_PER_DAY` | `2000` | 单 IP 每天提问上限；上线建议 `60` |
 | `GLOBAL_PER_DAY` | `5000` | 全站每日提问总量上限（兜底止损）；上线建议 `500` |
 | `HEALTH_PER_MINUTE` | `120` | 单 IP 每分钟 `/api/health` 上限（独立计数，不占提问额度）；上线建议 `30` |
+| `ADMIN_TOKEN` | （空） | 人工接管面板（`/admin/takeover.html`）口令；留空则 `/api/pending`、`/api/session/*`、`/api/resolve` 一律返回 503，正常聊天不受影响 |
 | `FAQ_CACHE_ENABLED` | `1` | 设为 `0` 关闭 FAQ 首问缓存（自测时确保每次都走模型） |
 | `ALLOWED_ORIGINS` | （空） | 额外允许的来源域名，逗号分隔 |
 | `COZE_CA_BUNDLE` | （空） | 自定义 CA 证书路径；本地证书校验失败（certificate verify failed）时手动指定 |
@@ -222,10 +223,11 @@ GitHub Pages 只能托管静态文件，跑不了后端，所以**真实对话�
 打开 `https://你的域名/api/health`，应返回：
 
 ```json
-{"ok": true, "bot_id": "7694865098007035940", "api_base": "https://api.coze.cn", "token_ready": true, "version": "YoumianProxy/2.0.3", "uptime": 3600.0, "last_activity_at": "2026-11-09T08:05:00Z", "seconds_since_activity": 42.3, "keepalive_window_s": 1200, "keepalive_ok": true}
+{"ok": true, "bot_id": "7706539492081270810", "api_base": "https://api.coze.cn", "token_ready": true, "version": "YoumianProxy/2.0.3", "uptime": 3600.0, "last_activity_at": "2026-11-09T08:05:00Z", "seconds_since_activity": 42.3, "keepalive_window_s": 1200, "keepalive_ok": true}
 ```
 
-`token_ready` 为 `false` 说明环境变量没配上；`version` 可以用来确认这次部署的代码是否真的上线；`ok` 都拿不到说明服务没起来。`keepalive_ok` 为 `false` 表示最近 20 分钟没有真实流量，外部探活可能失效，排查见 [`docs/keepalive.md`](docs/keepalive.md)。
+`token_ready` 为 `false` 说明环境变量没配上；`version` 可以用来确认这次部署的代码是否真的上线；`ok` 都拿不到说明服务没起来。
+判读是否被唤醒过要看 `uptime`：免费实例休眠后进程会重建，`uptime` 归零重新计时，所以**隔几分钟连查两次、`uptime` 持续增长**才说明实例一直醒着；`uptime` 总是很小的值，就是还在反复冷启动。`keepalive_ok` 只反映「最近 20 分钟有没有真实流量」，外部探活没配或 GitHub 定时任务被降频时它会一直是 `false`，不能单独拿它判断线上是否可用，排查见 [`docs/keepalive.md`](docs/keepalive.md)。
 
 ### 每次发布前照清单走
 
@@ -246,7 +248,7 @@ GitHub Pages 只能托管静态文件，跑不了后端，所以**真实对话�
 python3 -m unittest discover -s tests -t . -v
 ```
 
-共 144 条（后端 79 / 查表层 23 / 索引 6 / 数值守卫 31 / 门禁 5），CI 每次推送都会执行。
+共 171 条（后端 92 / 查表层 37 / 索引 6 / 数值守卫 31 / 门禁 5），CI 每次推送都会执行。
 
 ## 效果评测（v2.0.3）
 

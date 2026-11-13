@@ -393,6 +393,25 @@ class HandoffContextTest(unittest.TestCase):
             token, "9.9.9.9", "正在为您转接人工客服", []), 1)
         self.assertEqual(len(server.PENDING_HANDOFF), 2)
 
+    def test_handoff_messages_are_capped(self):
+        """单工单消息条数封顶：转人工不占提问额度，不封顶会被循环脚本撑爆内存。"""
+        token, _, _, _ = server.SESSIONS.resolve("")
+        history = [{"role": "user", "text": f"q{i}", "ts": time.time()} for i in range(200)]
+        server.record_handoff(token, "9.9.9.9", "正在为您转接人工客服", history)
+        entry = server.PENDING_HANDOFF[token]
+        self.assertEqual(len(entry["messages"]), server.HANDOFF_MESSAGES_MAX)
+        self.assertEqual(entry["messages"][-1]["text"], "q199")
+
+    def test_appended_handoff_messages_are_capped(self):
+        """转人工后继续发消息，同一工单也不能无限增长。"""
+        token, _, _, _ = server.SESSIONS.resolve("")
+        server.record_handoff(token, "9.9.9.9", "正在为您转接人工客服", [])
+        for i in range(server.HANDOFF_MESSAGES_MAX + 20):
+            server.append_handoff_message(token, f"m{i}", "9.9.9.9")
+        entry = server.PENDING_HANDOFF[token]
+        self.assertEqual(len(entry["messages"]), server.HANDOFF_MESSAGES_MAX)
+        self.assertEqual(entry["messages"][-1]["text"], f"m{server.HANDOFF_MESSAGES_MAX + 19}")
+
     def test_handoff_message_goes_to_human_without_upstream_call(self):
         """方案 B：已转人工后发消息不调上游、不出机器人回复，只落同一工单。"""
         token, _, _, _ = server.SESSIONS.resolve("")
@@ -764,13 +783,27 @@ class ServerIntegrationTest(unittest.TestCase):
         cls.httpd.server_close()
         cls.thread.join(timeout=3)
 
-    def _request(self, method, path, body=None):
+    def _request(self, method, path, body=None, headers=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
         try:
-            conn.request(method, path, body=body,
-                         headers={"Content-Type": "application/json"} if body else {})
+            hdrs = dict(headers or {})
+            if body:
+                hdrs["Content-Type"] = "application/json"
+            conn.request(method, path, body=body, headers=hdrs)
             resp = conn.getresponse()
             return resp.status, resp.read()
+        finally:
+            conn.close()
+
+    def _request_with_headers(self, method, path, body=None, headers=None):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        try:
+            hdrs = dict(headers or {})
+            if body:
+                hdrs["Content-Type"] = "application/json"
+            conn.request(method, path, body=body, headers=hdrs)
+            resp = conn.getresponse()
+            return resp.status, resp.read(), dict(resp.getheaders())
         finally:
             conn.close()
 
@@ -811,8 +844,44 @@ class ServerIntegrationTest(unittest.TestCase):
             status, body = self._request("POST", "/api/chat",
                                          json.dumps({"message": "测试"}))
         data = json.loads(body)
-        self.assertEqual(status, 500)
+        # 缺令牌是「服务端没准备好」，不是「服务器内部错误」：503 让探活/监控能区分
+        self.assertEqual(status, 503)
         self.assertIn("COZE_API_TOKEN", data["error"])
+
+    def test_chat_rejects_json_array_without_dropping_connection(self):
+        """合法 JSON 但不是对象：必须回 400，不能抛 AttributeError 把连接掐断。"""
+        for payload in ("[]", '"plain"', "123"):
+            with self.subTest(payload=payload):
+                status, body = self._request("POST", "/api/chat", payload)
+                self.assertEqual(status, 400)
+                self.assertIn("JSON 对象", json.loads(body)["error"])
+
+    def test_chat_rejects_non_string_message(self):
+        status, body = self._request("POST", "/api/chat", json.dumps({"message": 123}))
+        self.assertEqual(status, 400)
+        self.assertIn("字符串", json.loads(body)["error"])
+
+    def test_resolve_rejects_non_object_json(self):
+        with mock.patch.object(server, "ADMIN_TOKEN", "test-token"):
+            status, body = self._request(
+                "POST", "/api/resolve", "[]",
+                headers={"X-Admin-Token": "test-token"})
+        self.assertEqual(status, 400)
+        self.assertIn("JSON 对象", json.loads(body)["error"])
+
+    def test_static_only_serves_whitelisted_extensions(self):
+        """.py / .json 等工程文件不能被当静态资源下载，前端资源照常可用。"""
+        self.assertEqual(self._request("GET", "/index.html")[0], 200)
+        self.assertEqual(self._request("GET", "/server.py")[0], 404)
+        self.assertEqual(self._request("GET", "/data/kb_fact_index.json")[0], 404)
+
+    def test_rate_limited_response_carries_retry_after(self):
+        with mock.patch.object(server.LIMITER, "check", return_value=(False, "提问有点快哦")):
+            status, body, headers = self._request_with_headers(
+                "POST", "/api/chat", json.dumps({"message": "测试"}))
+        self.assertEqual(status, 429)
+        self.assertEqual(headers.get("Retry-After"), "60")
+        self.assertIn("快", json.loads(body)["error"])
 
     def test_reset_endpoint_works_without_token(self):
         """清空会话不依赖扣子令牌，后端不可用时也应能重置本地会话。"""

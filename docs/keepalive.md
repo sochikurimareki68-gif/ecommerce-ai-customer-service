@@ -11,7 +11,7 @@
 | 用途 | URL | 说明 |
 |------|-----|------|
 | 探活目标 | `https://youmian-customer-service.onrender.com/` | **打首页，不要打 `/api/health`** |
-| 验证心跳 | `https://youmian-customer-service.onrender.com/api/health` | 看 `keepalive_ok` / `seconds_since_activity` |
+| 验证在线 | `https://youmian-customer-service.onrender.com/api/health` | 看 `uptime`（隔几分钟两次采样递增 = 没被休眠）/ `keepalive_ok`（最近 20 分钟有无真实流量） |
 
 为什么探首页：`/api/health` 被特意排除在心跳统计之外，否则探针自己会把
 `seconds_since_activity` 永远刷成 0，keepalive 失效也看不出来。首页是静态资源，
@@ -29,6 +29,7 @@
    - **Timeout**：30 秒（冷启动首包会慢，给足时间）
    - **Enable job**：勾选
 4. 保存后等 5–10 分钟，打开 `/api/health` 确认：
+   - `uptime` 隔几分钟连续采样是递增的（递增 = 进程一直活着，没被休眠重建）
    - `keepalive_ok` 为 `true`
    - `seconds_since_activity` 小于 300 左右
    - `last_activity_at` 在最近 5 分钟内
@@ -43,7 +44,7 @@
    - **URL**：`https://youmian-customer-service.onrender.com/`
    - **Monitoring Interval**：5 minutes
    - **Alert Contacts**：填自己的邮箱（服务挂了也能收到通知）
-3. 保存后同样用 `/api/health` 的 `keepalive_ok` 验证。
+3. 保存后同样用 `/api/health` 验证：`uptime` 两次采样递增，且 `keepalive_ok` 为 `true`。
 4. 免费版最小间隔 5 分钟，刚好小于 Render 的休眠阈值。
 
 ## 四、Render 侧确认
@@ -66,6 +67,8 @@
 }
 ```
 
+- 判读顺序：先看 `uptime` —— 隔几分钟两次采样若归零重算，说明实例刚被唤醒（探活没兜住）；
+  `uptime` 持续增长后再看 `keepalive_ok`。
 - `keepalive_ok: false` 且 `seconds_since_activity` 持续增大 → 探活没生效，按顺序查：
   1. 探活任务是否被暂停 / 欠费；
   2. URL 是否误填成 `/api/health`（健康检查不计心跳）；
@@ -81,7 +84,7 @@
 
 ## 七、面试前 3 分钟检查清单
 
-1. `curl -s https://youmian-customer-service.onrender.com/api/health` 看 `keepalive_ok`；
+1. `curl -s https://youmian-customer-service.onrender.com/api/health` 看 `uptime`（隔 2 分钟再查一次，应递增）；
 2. 浏览器打开首页，确认气泡/聊天能正常加载；
 3. 发一条「有什么优惠活动」确认端到端可用；
 4. 若刚睡醒，等 60 秒再刷新，不要连续猛刷触发限流。

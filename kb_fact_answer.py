@@ -79,13 +79,32 @@ _PREFERRED_SECTIONS: dict[str, tuple[tuple[str, str], ...]] = {
     "feature": (("防水", "三款面料与季节差异"), ("透气", "三款面料与季节差异")),
 }
 
-# 品类词 → 所属文件前缀：用户说「床垫保护套」时先锁定该品类，避免串到别品类价格表。
-_CATEGORY_FILES: dict[str, str] = {
-    "四件套": "02-", "套件": "02-", "三件套": "02-", "六件套": "02-",
-    "被芯": "03-", "被子": "03-",
-    "枕芯": "04-", "枕头": "04-", "乳胶枕": "04-", "记忆棉": "04-",
-    "保护套": "05-", "床垫罩": "05-", "床垫保护套": "05-",
+# 品类词 → 所属品类代码。顺序即优先级：先具体后笼统，
+# 「床垫保护套」必须先于「保护套」，「被套」必须先于「被」。
+_CATEGORY_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("05", ("床垫保护套", "床垫罩", "床笠", "保护套")),
+    ("02", ("四件套", "三件套", "六件套", "套件", "被套", "床单", "床裙", "枕套")),
+    ("03", ("被芯", "被子", "羽绒被", "蚕丝被", "夏凉被", "子母被", "绒被", "纤维被")),
+    ("04", ("枕芯", "枕头", "乳胶枕", "记忆棉枕", "软管枕", "鹅绒枕")),
+)
+
+# 跨品类文件（01/06/14）里靠段落标题判断归属；判断不出来就视为通用条目。
+_ENTRY_CATEGORY_HINTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("05", ("床垫保护套", "床笠", "保护套")),
+    ("04", ("枕芯", "枕头", "枕高", "睡姿")),
+    ("03", ("被芯", "被子", "羽绒被", "蚕丝被", "夏凉被", "子母被")),
+    ("02", ("四件套", "套件", "床单", "被套", "床裙")),
+)
+
+# 段落标题本身横跨多个品类时，按标题而不是关键词归属，避免被误判成单品类。
+_ENTRY_CATEGORY_OVERRIDES: dict[str, tuple[str, ...]] = {
+    "枕芯尺寸与枕套匹配": ("04",),
+    "枕芯与床品的更换周期": ("04", "02"),
+    "被套与被芯的尺寸匹配": ("02", "03"),
 }
+
+# 这些事实离开品类无法确定归属，没品类词也没商品名时不猜，交回模型。
+_CATEGORY_BOUND_INTENTS = {"price", "size", "material", "wash", "weight", "thread", "feature"}
 
 # 条目段落关键词：同一意图下优先命中主题更贴的段落。
 _SECTION_HINTS: dict[str, tuple[str, ...]] = {
@@ -188,6 +207,38 @@ def _match_products(message: str, products: list[dict]) -> list[dict]:
     return hits
 
 
+def _detect_category(msg_norm: str) -> str:
+    """问题里最具体的品类词 → 品类代码；没有明确品类词返回空串。
+
+    取「最长命中」而不是「先命中」：「床垫保护套」不能被「保护套」抢先，
+    「四件套」也不能被「套件」抢先。
+    """
+    best_code = ""
+    best_len = 0
+    for code, words in _CATEGORY_RULES:
+        for word in words:
+            norm = normalize(word)
+            if norm and norm in msg_norm and len(norm) > best_len:
+                best_code, best_len = code, len(norm)
+    return best_code
+
+
+def _entry_categories(entry: dict) -> set[str]:
+    """条目所属品类代码集合；空集合表示通用条目（不绑定品类）。"""
+    prefix = (entry.get("file") or "")[:2]
+    if prefix in {"02", "03", "04", "05"}:
+        return {prefix}
+    section = entry.get("section") or ""
+    for title, codes in _ENTRY_CATEGORY_OVERRIDES.items():
+        if normalize(title) == normalize(section):
+            return set(codes)
+    norm = normalize(section)
+    return {
+        code for code, words in _ENTRY_CATEGORY_HINTS
+        if any(normalize(word) in norm for word in words)
+    }
+
+
 def _presence_check(message: str, entry: dict) -> bool:
     """问题里点名了床型/规格时，原文答复必须能对上，否则不命中。"""
     msg = normalize(message)
@@ -224,12 +275,14 @@ def match_fact(message: str, index: dict) -> dict | None:
     if product is None and (intents & _NEEDS_PRODUCT):
         return None
 
-    category_file = ""
-    if product is None:
-        for word, prefix in _CATEGORY_FILES.items():
-            if normalize(word) in msg_norm:
-                category_file = prefix
-                break
+    category = _detect_category(msg_norm)
+    # 商品与问题里的品类词冲突时，不猜：交给模型澄清。
+    if product and category and (product.get("file") or "")[:2] in {"02", "03", "04", "05"}:
+        if (product.get("file") or "")[:2] != category:
+            return None
+    # 品类归属不清（既没品类词也没商品名）时，这些事实不猜，交回模型。
+    if not category and product is None and (intents & _CATEGORY_BOUND_INTENTS):
+        return None
 
     best = None
     second = 0.0
@@ -245,9 +298,10 @@ def match_fact(message: str, index: dict) -> dict | None:
             continue
         if product is None and entry.get("scope") == "product":
             continue
-        if (category_file and entry.get("file", "")[:3] in {"02-", "03-", "04-", "05-"}
-                and not entry.get("file", "").startswith(category_file)):
-            continue
+        if category:
+            entry_cats = _entry_categories(entry)
+            if entry_cats and category not in entry_cats:
+                continue
         if product and entry.get("scope") == "product" and not same_product:
             continue
         if not _presence_check(message, entry):
@@ -279,7 +333,7 @@ def match_fact(message: str, index: dict) -> dict | None:
         # 已知商品时，别品类的通用段落要让位给本品类原文。
         if product and entry.get("scope") == "category" and entry.get("file") != product.get("file"):
             score -= 12.0
-        if category_file and entry.get("file", "").startswith(category_file):
+        if category and (entry.get("file") or "").startswith(category):
             score += 8.0
         for intent in shared:
             hints = _SECTION_HINTS.get(intent) or ()

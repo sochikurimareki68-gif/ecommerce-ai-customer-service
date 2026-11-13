@@ -125,6 +125,116 @@ class FactMatchTest(unittest.TestCase):
         self.assert_miss("买个被芯多少钱")
 
 
+class CategoryBindingTest(unittest.TestCase):
+    """品类强约束：问题里有明确品类词时，只能命中该品类的条目。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.index = K.load_index(ROOT / "data" / "kb_fact_index.json")
+
+    def entry_categories(self, message: str) -> set[str]:
+        result = K.match_fact(message, self.index)
+        if result is None:
+            return set()
+        return K._entry_categories(result["entry"])
+
+    def test_category_words_map_to_expected_categories(self):
+        cases = {
+            "床垫保护套能机洗吗": "05",
+            "床笠怎么洗": "05",
+            "四件套能机洗吗": "02",
+            "三件套多少钱": "02",
+            "被芯能机洗吗": "03",
+            "羽绒被怎么洗": "03",
+            "枕芯能机洗吗": "04",
+            "乳胶枕多少钱": "04",
+            "能机洗吗": "",
+        }
+        for message, expected in cases.items():
+            with self.subTest(message=message):
+                self.assertEqual(K._detect_category(K.normalize(message)), expected)
+
+    def test_shared_file_sections_are_bound_to_their_category(self):
+        """01/06/14 是跨品类文件，靠段落标题归属，不能整篇算通用。"""
+        found = {}
+        for entry in self.index["entries"]:
+            found.setdefault((entry["file"], entry["section"]), K._entry_categories(entry))
+        self.assertEqual(found[("06-洗护与保养.md", "被芯的清洁方式")], {"03"})
+        self.assertEqual(found[("06-洗护与保养.md", "枕芯的清洁方式")], {"04"})
+        self.assertEqual(found[("06-洗护与保养.md", "床单被套的清洗频率")], {"02"})
+        self.assertEqual(found[("14-选购知识.md", "被芯尺寸与床宽匹配")], {"03"})
+        self.assertEqual(found[("14-选购知识.md", "枕芯尺寸与枕套匹配")], {"04"})
+        self.assertEqual(found[("01-品牌认证与规格.md", "四件套尺寸对照")], {"02"})
+        self.assertEqual(found[("06-洗护与保养.md", "纯棉床品的洗涤参数")], set())
+
+    def test_four_categories_never_return_another_category(self):
+        """四品类 × 洗护/价格/尺寸/材质 全量问法：命中只能是本品类或通用条目。"""
+        cases = [
+            ("02", "四件套能机洗吗"),
+            ("02", "云柔四件套能机洗吗"),
+            ("02", "四件套怎么洗"),
+            ("02", "纯棉四件套水温多少"),
+            ("02", "云柔四件套多少钱"),
+            ("02", "暖阳四件套多少钱"),
+            ("02", "四件套尺寸多大"),
+            ("02", "四件套有1.8米的吗"),
+            ("02", "四件套是什么面料"),
+            ("02", "云柔四件套是什么材质"),
+            ("03", "被芯能机洗吗"),
+            ("03", "羽绒被怎么洗"),
+            ("03", "被芯水温多少"),
+            ("03", "大豆纤维被多少钱"),
+            ("03", "被芯尺寸多大"),
+            ("03", "被芯有1.8米的吗"),
+            ("03", "被芯是什么面料"),
+            ("03", "羽绒被是什么材质"),
+            ("04", "枕芯能机洗吗"),
+            ("04", "记忆棉枕怎么洗"),
+            ("04", "乳胶枕能机洗吗"),
+            ("04", "乳胶枕多少钱"),
+            ("04", "枕芯尺寸多大"),
+            ("04", "枕芯是什么材质"),
+            ("05", "床垫保护套能机洗吗"),
+            ("05", "床笠怎么洗"),
+            ("05", "床垫保护套水温多少"),
+            ("05", "床垫保护套多少钱"),
+            ("05", "床笠多少钱"),
+            ("05", "床垫保护套尺寸多大"),
+            ("05", "床垫保护套有1.8米的吗"),
+            ("05", "床垫保护套是什么面料"),
+            ("05", "床笠防水吗"),
+        ]
+        for expected, message in cases:
+            with self.subTest(message=message):
+                cats = self.entry_categories(message)
+                self.assertTrue(
+                    not cats or expected in cats,
+                    f"{message} 命中了 {sorted(cats)}，期望 {expected} 或通用条目",
+                )
+
+    def test_key_phrasings_hit_their_own_category_entry(self):
+        cases = {
+            "四件套尺寸多大": "四件套尺寸对照",
+            "四件套有1.8米的吗": "四件套尺寸对照",
+            "枕芯尺寸多大": "枕芯尺寸与枕套匹配",
+            "被芯尺寸多大": "被芯尺寸与床宽匹配",
+            "床垫保护套有1.8米的吗": "按床型选规格与价格对照",
+            "被芯能机洗吗": "被芯的清洁方式",
+            "枕芯能机洗吗": "枕芯的清洁方式",
+        }
+        for message, section in cases.items():
+            with self.subTest(message=message):
+                result = K.match_fact(message, self.index)
+                self.assertIsNotNone(result, message)
+                self.assertEqual(result["entry"]["section"], section, message)
+
+    def test_category_word_is_required_for_category_bound_facts(self):
+        """没有品类词也不带商品名时，洗护/尺寸/材质宁可放给模型，不猜。"""
+        for message in ("能机洗吗", "尺寸多大", "是什么面料", "怎么洗", "水温多少"):
+            with self.subTest(message=message):
+                self.assertIsNone(K.match_fact(message, self.index), message)
+
+
 class FactServerIntegrationTest(unittest.TestCase):
     def setUp(self):
         # 测试稳定：不受本地环境变量影响

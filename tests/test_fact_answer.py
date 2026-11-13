@@ -266,6 +266,31 @@ class CategoryBindingTest(unittest.TestCase):
             self.assertIn(fragment, result["reply"], fragment)
         self.assertIn("磨毛款与法兰绒款按各自洗护条目执行", result["entry"]["exception"])
 
+    def test_drying_question_is_answered_by_category_entry(self):
+        """「能不能烘干」要落到套件条目并正面回答，不能只讲机洗。"""
+        result = K.match_fact("四件套能不能烘干", self.index)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["entry"]["file"], "02-床品套件.md")
+        self.assertIn("不建议高温烘干", result["reply"])
+        self.assertIn("低温烘干或自然晾干", result["reply"])
+
+    def test_colloquial_wash_phrasings_are_recognized(self):
+        """水洗 / 能不能洗 / 可以洗吗 这类口语问法也要进洗护意图。"""
+        cases = {
+            "枕芯能水洗吗": ("06-洗护与保养.md", "枕芯的清洁方式"),
+            "四件套能不能洗": ("02-床品套件.md", "可机洗与洗涤方式"),
+            "云柔四件套可以洗吗": ("02-床品套件.md", "可机洗与洗涤方式"),
+            "四件套可水洗吗": ("02-床品套件.md", "可机洗与洗涤方式"),
+            "被芯可以洗吗": ("06-洗护与保养.md", "被芯的清洁方式"),
+            "床垫保护套能水洗吗": ("05-床垫保护套系列.md", "机洗、水温与烘干"),
+        }
+        for message, (file, section) in cases.items():
+            with self.subTest(message=message):
+                result = K.match_fact(message, self.index)
+                self.assertIsNotNone(result, message)
+                self.assertEqual(result["entry"]["file"], file, message)
+                self.assertEqual(result["entry"]["section"], section, message)
+
 
 class FactServerIntegrationTest(unittest.TestCase):
     def setUp(self):

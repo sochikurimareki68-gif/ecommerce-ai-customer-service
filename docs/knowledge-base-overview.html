@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>优眠家居 · 知识库总览（上传核对版）</title>
+<style>
+  :root{
+    --bg:#f6f2ea;
+    --card:#fffdfa;
+    --ink:#2b2a27;
+    --muted:#7b746b;
+    --line:#e6dfd3;
+    --accent:#8a5a34;
+    --suite:#a9743f;
+    --quilt:#6f8459;
+    --pillow:#5f7488;
+    --protect:#866f8c;
+    --policy:#8a6a3f;
+    --service:#6b6b63;
+    --warn:#8a5a17;
+    --ok:#4f6b45;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1100px 460px at 8% -8%, #efe5d6 0%, rgba(239,229,214,0) 60%),
+      radial-gradient(900px 400px at 100% 0%, #ece9e0 0%, rgba(236,233,224,0) 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    line-height:1.65;
+    font-size:15px;
+  }
+  .wrap{max-width:1240px;margin:0 auto;padding:40px 26px 70px}
+  header.hero{margin-bottom:26px}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:8px;
+    font-size:12px;letter-spacing:.16em;color:var(--accent);
+    font-weight:700;text-transform:uppercase;
+  }
+  .eyebrow::before{content:"";width:28px;height:1px;background:var(--accent)}
+  h1{margin:10px 0 8px;font-size:34px;line-height:1.25;letter-spacing:-.01em}
+  .sub{margin:0;color:var(--muted);font-size:14px}
+  .sub code{background:#efe9df;border-radius:4px;padding:1px 5px;font-size:12.5px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .stamp{font-variant-numeric:tabular-nums}
+
+  .summary{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:24px 0 8px}
+  .stat{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+  .stat .k{font-size:12px;color:var(--muted);letter-spacing:.03em}
+  .stat .v{font-size:23px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums;line-height:1.25}
+  .stat .v small{font-size:12px;font-weight:500;color:var(--muted);margin-left:3px}
+  .stat .d{font-size:11.5px;color:var(--muted);margin-top:2px}
+
+  .legend{
+    margin:16px 0 30px;padding:12px 16px;border-radius:12px;
+    background:#fbf8f2;border:1px dashed var(--line);color:var(--muted);font-size:13px;
+  }
+  .legend b{color:var(--ink)}
+
+  .cat{margin:38px 0 0}
+  .cat-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:12px;padding-bottom:10px;border-bottom:2px solid var(--line)}
+  .cat-head h2{margin:0;font-size:21px}
+  .cat-meta{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+  .note{margin:12px 0 14px;color:var(--muted);font-size:13px}
+
+  .tablewrap{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:auto;
+    box-shadow:0 1px 0 rgba(43,42,39,.03);
+  }
+  table{border-collapse:collapse;width:100%;min-width:900px}
+  thead th{
+    position:sticky;top:0;z-index:2;background:#f4efe5;
+    text-align:left;font-size:12px;letter-spacing:.05em;color:#5f594f;
+    font-weight:700;padding:11px 13px;border-bottom:1px solid var(--line);white-space:nowrap;
+  }
+  tbody td{padding:12px 13px;border-bottom:1px solid #f0ebe2;vertical-align:top;font-size:13.5px}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:nth-child(even){background:#fdfbf7}
+  tbody tr:hover{background:#faf5ec}
+  .num{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+  .fname{font-weight:650;white-space:nowrap}
+  .fname span{display:block;font-weight:400;color:var(--muted);font-size:11.5px;margin-top:1px}
+  .type{white-space:nowrap;font-weight:600;font-size:12.5px}
+  .badge{display:inline-block;font-size:11.5px;border-radius:999px;padding:1px 8px;border:1px solid var(--line);background:#f7f2e8;color:#5c5549;white-space:nowrap}
+  .b-suite{color:var(--suite);background:#fbf2e7;border-color:#efdcc6}
+  .b-quilt{color:var(--quilt);background:#f1f5ec;border-color:#dbe5d2}
+  .b-pillow{color:var(--pillow);background:#edf2f6;border-color:#d5e0e8}
+  .b-protect{color:var(--protect);background:#f5eff6;border-color:#e4d7e7}
+  .b-policy{color:var(--policy);background:#f9f1e2;border-color:#eeddc0}
+  .b-service{color:var(--service);background:#f2f1ec;border-color:#e2e0d6}
+  .todo{color:var(--warn);font-weight:700}
+  .zero{color:var(--ok);font-weight:600}
+  .tot td{background:#f4efe5!important;font-weight:700;border-top:2px solid var(--line)}
+  .tot .num{font-weight:700}
+
+  .params{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+  .panel h3{margin:0 0 12px;font-size:16px}
+  .kv{display:grid;grid-template-columns:110px 1fr;gap:8px 12px;font-size:13.5px}
+  .kv dt{color:var(--muted)}
+  .kv dd{margin:0;font-weight:600}
+  .checks{margin:0;padding-left:18px;font-size:13.5px}
+  .checks li{margin-bottom:7px}
+  .crit{color:var(--muted);font-size:12.5px}
+
+  footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+  footer p{margin:6px 0}
+  footer b{color:var(--ink)}
+  @media (max-width:980px){
+    .summary{grid-template-columns:repeat(3,1fr)}
+    .params{grid-template-columns:1fr}
+  }
+  @media (max-width:620px){
+    .wrap{padding:26px 14px 48px}
+    h1{font-size:26px}
+    .summary{grid-template-columns:repeat(2,1fr)}
+  }
+  @media print{
+    body{background:#fff}
+    .wrap{max-width:none;padding:0}
+    .tablewrap{overflow:visible;box-shadow:none}
+    thead th{position:static}
+    .cat{break-inside:avoid}
+    tbody tr{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">优眠家居 · 知识库总览</div>
+    <h1>上传前核对：14 个文件、171 条问答、15 处有意留空</h1>
+    <p class="sub">数据实测自 <code>docs/knowledge-base/upload/</code>，统计时间 2026-11-13。字符数包含 Markdown 标记与换行；待补仅统计仍保留「待补」字样的条目。</p>
+  </header>
+
+  <section class="summary" aria-label="汇总">
+    <div class="stat"><div class="k">文件</div><div class="v">14 <small>个</small></div><div class="d">14 个主题域</div></div>
+    <div class="stat"><div class="k">条目</div><div class="v">171 <small>条</small></div><div class="d">按 ### 统计</div></div>
+    <div class="stat"><div class="k">总字符</div><div class="v">48,467</div><div class="d">118.2 KB</div></div>
+    <div class="stat"><div class="k">待补</div><div class="v">15 <small>处</small></div><div class="d">全部有意留空</div></div>
+    <div class="stat"><div class="k">商品</div><div class="v">21 <small>款</small></div><div class="d">套件 9·被芯 5·枕芯 4·保护套 3</div></div>
+    <div class="stat"><div class="k">预期分段</div><div class="v">≈171</div><div class="d">实际以平台返回为准</div></div>
+  </section>
+
+  <div class="legend">
+    <b>读表说明：</b>「待补」是知识库中明确标注、等待业务提供的事实；本轮已补齐 34 处影响问答质量的条目，并按「1-9 套零售 / 10 套起团购 / 100 套起定制」统一关闭 4 处团购类待补、按 07 口径补齐 1 处重复仓配待补、关闭门店与客服电话 2 处表述型待补，剩余 15 处均为经营、资质、票据、仓配类信息，<b>有意留空，不是漏写</b>。带「≈」的数值为推算值，已在文中标注。
+  </div>
+
+  <!-- ================= 表一 ================= -->
+  <section class="cat">
+    <div class="cat-head">
+      <h2>表一 · 文件总览</h2>
+      <div class="cat-meta">14 个文件 · 171 条 · 48,467 字符</div>
+    </div>
+    <p class="note">按门类分组阅读；「主要覆盖问题」只列该文件的核心问答范围，不代表全部细节。</p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="min-width:210px">文件</th>
+            <th>门类</th>
+            <th class="num">### 条目</th>
+            <th class="num">字符数</th>
+            <th class="num">大小</th>
+            <th class="num">剩余待补</th>
+            <th style="min-width:360px">主要覆盖问题类型</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="fname">01-品牌认证与规格.md<span>品牌、产地、认证、面料、规格</span></td>
+            <td><span class="badge b-policy">政策</span></td>
+            <td class="num">10</td><td class="num">3,109</td><td class="num">7.58 KB</td>
+            <td class="num todo">2</td>
+            <td>品牌定位与经营范围、产地工厂、OEKO-TEX 与 ISO 认证、荧光剂安全、面料种类与选型、套件件数、四件套尺寸、颜色、价格口径</td>
+          </tr>
+          <tr>
+            <td class="fname">02-床品套件.md<span>9 款套件</span></td>
+            <td><span class="badge b-suite">套件</span></td>
+            <td class="num">31</td><td class="num">8,345</td><td class="num">19.54 KB</td>
+            <td class="num todo">2</td>
+            <td>云柔、暖阳、法兰绒、云裳、清风、云端、童趣、尊享、亲肤 9 款的面料、参数、规格价格、洗护与售后；刺绣定制；全系预算与季节对比</td>
+          </tr>
+          <tr>
+            <td class="fname">03-被芯系列.md<span>5 款被芯</span></td>
+            <td><span class="badge b-quilt">被芯</span></td>
+            <td class="num">18</td><td class="num">4,697</td><td class="num">10.42 KB</td>
+            <td class="num zero">0</td>
+            <td>鹅绒被、蚕丝被、大豆纤维被、夏凉被、子母被的填充、保暖档、尺寸、价格、钻绒与禁忌人群、洗护禁忌、全系对比</td>
+          </tr>
+          <tr>
+            <td class="fname">04-枕芯系列.md<span>4 款枕芯</span></td>
+            <td><span class="badge b-pillow">枕芯</span></td>
+            <td class="num">17</td><td class="num">3,958</td><td class="num">9.67 KB</td>
+            <td class="num zero">0</td>
+            <td>记忆棉、乳胶、PE 软管、鹅绒枕的密度、枕高、硬度、适用季节、价格、清洁与更换、过敏售后、单卖枕套、枕芯与枕套区别</td>
+          </tr>
+          <tr>
+            <td class="fname">05-床垫保护套系列.md<span>3 款保护套</span></td>
+            <td><span class="badge b-protect">保护套</span></td>
+            <td class="num">12</td><td class="num">2,996</td><td class="num">7.19 KB</td>
+            <td class="num zero">0</td>
+            <td>纯棉防水、天丝凉感、磨毛加厚的材质、防水层、规格价格、非标定制尺寸与周期、机洗水温与烘干、系列对比</td>
+          </tr>
+          <tr>
+            <td class="fname">06-洗护与保养.md<span>洗护知识</span></td>
+            <td><span class="badge b-service">服务</span></td>
+            <td class="num">13</td><td class="num">4,248</td><td class="num">10.97 KB</td>
+            <td class="num todo">1</td>
+            <td>首次使用、纯棉/天丝/磨毛/法兰绒洗护、被芯与枕芯清洁、晾晒、收纳、清洗频率、缩水、起球判定、更换周期</td>
+          </tr>
+          <tr>
+            <td class="fname">07-物流与发货.md<span>发货与物流</span></td>
+            <td><span class="badge b-service">服务</span></td>
+            <td class="num">10</td><td class="num">2,836</td><td class="num">7.57 KB</td>
+            <td class="num todo">3</td>
+            <td>发货仓、现货/预售/定制/调货时效、到货时效、大促延迟、快递匹配、包邮与运费、支付方式与货到付款、物流查询、物流不更新</td>
+          </tr>
+          <tr>
+            <td class="fname">08-退换货政策.md<span>退换货</span></td>
+            <td><span class="badge b-policy">政策</span></td>
+            <td class="num">10</td><td class="num">2,899</td><td class="num">7.63 KB</td>
+            <td class="num zero">0</td>
+            <td>7 天无理由条件与起算、退货/换货流程、验货不通过、运费承担与垫付上限、质量问题、售后时效、补发、仅退款、尺寸与色差</td>
+          </tr>
+          <tr>
+            <td class="fname">09-优惠活动.md<span>优惠与会员</span></td>
+            <td><span class="badge b-policy">政策</span></td>
+            <td class="num">8</td><td class="num">2,372</td><td class="num">5.93 KB</td>
+            <td class="num todo">1</td>
+            <td>满减、优惠券有效期、会员等级、积分、新客礼、叠加规则、大促、议价边界</td>
+          </tr>
+          <tr>
+            <td class="fname">10-售后处理.md<span>补发与补偿</span></td>
+            <td><span class="badge b-policy">政策</span></td>
+            <td class="num">6</td><td class="num">1,648</td><td class="num">4.32 KB</td>
+            <td class="num todo">1</td>
+            <td>破损补发、缺件补发、50 元寄回边界、缺件反馈时限、延迟发货补偿、投诉、保修、超期退换与起球判定</td>
+          </tr>
+          <tr>
+            <td class="fname">11-其他常见问题.md<span>零散问题</span></td>
+            <td><span class="badge b-service">服务</span></td>
+            <td class="num">3</td><td class="num">863</td><td class="num">2.21 KB</td>
+            <td class="num zero">0</td>
+            <td>新品气味、婴儿可用性、过敏处理</td>
+          </tr>
+          <tr>
+            <td class="fname">12-联系与增值服务.md<span>联系与团购</span></td>
+            <td><span class="badge b-service">服务</span></td>
+            <td class="num">6</td><td class="num">1,691</td><td class="num">4.26 KB</td>
+            <td class="num todo">3</td>
+            <td>联系渠道、服务时间、发票、团购、企业 LOGO/颜色/尺寸定制、关注店铺</td>
+          </tr>
+          <tr>
+            <td class="fname">13-场景推荐与搭配.md<span>场景导购</span></td>
+            <td><span class="badge b-service">服务</span></td>
+            <td class="num">9</td><td class="num">2,317</td><td class="num">5.65 KB</td>
+            <td class="num todo">2</td>
+            <td>送礼与婚庆、学生宿舍、颈椎、夏季、冬季、预算、品质、床品与保护套搭配</td>
+          </tr>
+          <tr>
+            <td class="fname">14-选购知识.md<span>选购常识</span></td>
+            <td><span class="badge b-service">服务</span></td>
+            <td class="num">18</td><td class="num">6,488</td><td class="num">15.29 KB</td>
+            <td class="num zero">0</td>
+            <td>纱支与密度、克重与季节、被芯三档、被芯尺寸匹配、枕高与睡姿（含硬度、季节）、面料成分、缩水起球、洗护差异、送礼婚庆</td>
+          </tr>
+          <tr class="tot">
+            <td>合计 14 个文件</td>
+            <td>6 类</td>
+            <td class="num">171</td><td class="num">48,467</td><td class="num">118.2 KB</td>
+            <td class="num">15</td>
+            <td>商品 21 款；政策与服务分离存放，同一事实只保留一处</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= 表二 ================= -->
+  <section class="cat">
+    <div class="cat-head">
+      <h2>表二 · 剩余 15 处待补明细</h2>
+      <div class="cat-meta">均为有意留空 · 上传后仍保留「待补」</div>
+    </div>
+    <p class="note">这 15 处不是漏写：要么需要业务授权，要么属于会随活动/仓配变化的信息，写死反而会答错。用户问到时的兜底统一为「回复转人工」。</p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="num" style="min-width:44px">#</th>
+            <th style="min-width:180px">文件</th>
+            <th style="min-width:230px">待补项</th>
+            <th style="min-width:360px">为什么不补</th>
+            <th>类型</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">1</td><td>01-品牌认证与规格</td><td>认证证书编号、检测机构与有效期</td><td>报告按面料批次出具，覆盖床品面料整体；证书编号、机构与有效期需业务提供</td><td><span class="badge b-policy">资质</span></td></tr>
+          <tr><td class="num">2</td><td>01-品牌认证与规格</td><td>大促档期与折扣幅度</td><td>活动时间与力度由运营临期发布，写死会与活动页冲突</td><td><span class="badge b-policy">活动</span></td></tr>
+          <tr><td class="num">3</td><td>02-床品套件</td><td>定制款活动规则</td><td>定制是否参加满减需运营确认，且随每期活动变化</td><td><span class="badge b-policy">活动</span></td></tr>
+          <tr><td class="num">4</td><td>02-床品套件</td><td>面料产地证明</td><td>需供应商产地证明与检测文件，属资质类材料</td><td><span class="badge b-policy">资质</span></td></tr>
+          <tr><td class="num">5</td><td>06-洗护与保养</td><td>收纳适宜温度与湿度</td><td>用户几乎不问具体温湿度，且无检测依据；正文只保留「干燥通风」的可执行建议</td><td><span class="badge b-service">参数</span></td></tr>
+          <tr><td class="num">6</td><td>07-物流与发货</td><td>前置仓覆盖的商品范围</td><td>仓配经营信息，会随备货与季节调整，不适合对外固定</td><td><span class="badge b-service">仓配</span></td></tr>
+          <tr><td class="num">7</td><td>07-物流与发货</td><td>顺丰补差价标准</td><td>运费按地址、重量与时效由结算页或客服核算，不报固定金额</td><td><span class="badge b-service">运费</span></td></tr>
+          <tr><td class="num">8</td><td>07-物流与发货</td><td>丢件赔付标准</td><td>需物流公司认定与赔付政策，不能提前承诺金额</td><td><span class="badge b-policy">赔付</span></td></tr>
+          <tr><td class="num">9</td><td>09-优惠活动</td><td>大促期间的满减档位与券面额</td><td>活动运营信息，以活动页为准，逐期不同</td><td><span class="badge b-policy">活动</span></td></tr>
+          <tr><td class="num">10</td><td>10-售后处理</td><td>各延迟档位对应的补偿标准</td><td>补偿金额与形式不对外披露，统一由人工客服确认</td><td><span class="badge b-policy">赔付</span></td></tr>
+          <tr><td class="num">11</td><td>12-联系与增值服务</td><td>发票开具时效与可补开范围</td><td>财务与税务流程，需财务确认时效与补开规则</td><td><span class="badge b-policy">票据</span></td></tr>
+          <tr><td class="num">12</td><td>12-联系与增值服务</td><td>定制周期、打样费用与打样次数</td><td>企业定制按项目报价，打样次数与费用需逐单确认</td><td><span class="badge b-policy">定制</span></td></tr>
+          <tr><td class="num">13</td><td>12-联系与增值服务</td><td>店铺券面额、门槛与领取次数</td><td>会员等级折扣见 09；店铺券面额随活动调整，以券面与活动页为准</td><td><span class="badge b-policy">活动</span></td></tr>
+          <tr><td class="num">14</td><td>13-场景推荐与搭配</td><td>组合购买是否有额外优惠</td><td>组合定价需运营确认，不能由导购条目自行承诺</td><td><span class="badge b-policy">活动</span></td></tr>
+          <tr><td class="num">15</td><td>13-场景推荐与搭配</td><td>组合购买是否有套装优惠</td><td>同上，属组合促销政策</td><td><span class="badge b-policy">活动</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= 表三 ================= -->
+  <section class="cat">
+    <div class="cat-head">
+      <h2>表三 · 上传参数与验证判据</h2>
+      <div class="cat-meta">按层级分段 · 层级 3 · 保留层级信息</div>
+    </div>
+    <div class="params">
+      <div class="panel">
+        <h3>上传参数</h3>
+        <dl class="kv">
+          <dt>分段方式</dt><dd>按层级分段</dd>
+          <dt>分段层级</dt><dd>3（# › ## › ###）</dd>
+          <dt>保留层级信息</dt><dd>勾选</dd>
+          <dt>存储位置</dt><dd>平台共享存储</dd>
+          <dt>Top K</dt><dd>3-5（先 3，命中不足再调到 5）</dd>
+          <dt>最小匹配度</dt><dd>0.3-0.4（先试 0.35）</dd>
+          <dt>分段长度/重叠</dt><dd>不适用，层级分段无此参数</dd>
+          <dt>文件格式</dt><dd>14 个 .md，UTF-8</dd>
+        </dl>
+        <p class="crit">以上为建议值；Top K 与匹配度需按实际召回效果微调，不是固定承诺。</p>
+      </div>
+      <div class="panel">
+        <h3>上传后验证判据</h3>
+        <ul class="checks">
+          <li><b>分段数：</b>应接近 171（每条 <code>###</code> 一段）。明显低于 150 说明层级识别失败；高于 200 说明被二次切碎。</li>
+          <li><b>层级路径：</b>随机点开 5 个分段，标题应带「主题域 › 子主题 › 问答」完整路径。</li>
+          <li><b>待补保留：</b>检索「发票」「团购」「丢件」时，回答应承认资料未覆盖并转人工，不得编造数值。</li>
+          <li><b>无串味：</b>问某款商品参数时，回答不应混入其他款的支数、克重或价格。</li>
+          <li><b>一致性：</b>同一问题连续问两次，价格、时效、售后门槛应完全一致。</li>
+        </ul>
+      </div>
+    </div>
+
+    <p class="note" style="margin-top:18px">抽检题：每题应命中对应文件，且答案要点与知识库一致。</p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="num" style="min-width:44px">#</th>
+            <th style="min-width:300px">抽检问题</th>
+            <th style="min-width:150px">期望命中</th>
+            <th style="min-width:420px">期望答案要点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">1</td><td>床垫保护套 1.8m 多少钱？</td><td>05-床垫保护套系列</td><td>1.8m ¥199；三档 1.2m ¥129 / 1.5m ¥169 / 1.8m ¥199</td></tr>
+          <tr><td class="num">2</td><td>新生儿能用你们的床品吗？</td><td>02-床品套件 / 11-其他常见问题</td><td>亲肤有机棉 0 个月起可用；首次使用前单独清洗；法兰绒起绒面不建议 1 岁以下贴身</td></tr>
+          <tr><td class="num">3</td><td>云朵鹅绒枕充绒多少？</td><td>04-枕芯系列</td><td>95% 白鹅绒、充绒 700g、48×74cm、枕高 8-10cm、硬度柔软、秋冬为主</td></tr>
+          <tr><td class="num">4</td><td>蚕丝被能水洗或干洗吗？</td><td>03-被芯系列</td><td>不可水洗、不可干洗；局部污渍用中性洗涤剂冷水湿布轻擦、阴干</td></tr>
+          <tr><td class="num">5</td><td>尊享款调货要等多久？</td><td>02-床品套件 / 07-物流与发货</td><td>5-7 个工作日，不含节假日，不承诺加急</td></tr>
+          <tr><td class="num">6</td><td>7 天无理由从哪天算？遇节假日顺延吗？</td><td>08-退换货政策</td><td>签收日为第 1 天；按自然日计算、不因节假日顺延；末日遇法定节假日顺延至节后第一个工作日</td></tr>
+          <tr><td class="num">7</td><td>补发多久能到？</td><td>08-退换货政策</td><td>确认后 24 小时内发出，走优先通道；只承诺发出时效，不承诺到货天数</td></tr>
+          <tr><td class="num">8</td><td>刺绣怎么收费？能绣图案或 LOGO 吗？</td><td>02-床品套件 / 13-场景推荐</td><td>¥50/套；仅限 ≤8 字文字（姓名、日期、短句），不支持图案与 LOGO；周期 3-5 个工作日</td></tr>
+          <tr><td class="num">9</td><td>枕芯多久洗一次、多久晾一次？</td><td>04-枕芯系列 / 06-洗护与保养</td><td>每 3 个月清洁 1 次；每周晾晒 1 次、每次 2-3 小时；乳胶只阴干</td></tr>
+          <tr><td class="num">10</td><td>磨毛四件套掉毛算质量问题吗？</td><td>02-床品套件 / 06-洗护与保养</td><td>前 2-3 次少量浮毛属正常；持续大量掉毛或成片起球凭照片按质量问题退换</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <p><b>数据来源：</b><code>ecommerce-ai-customer-service/docs/knowledge-base/upload/</code>，逐文件实测，未使用估算值；仅「预期分段数」为按 <code>###</code> 条数推算。</p>
+    <p><b>统计口径：</b>字符数含 Markdown 标记与换行；文件大小为 UTF-8 字节数；待补按「待补」字样出现次数统计，当前共 15 处。</p>
+    <p><b>生成时间：</b>2026-11-11 · 优眠家居电商 AI 客服项目</p>
+  </footer>
+
+</div>
+</body>
+</html>

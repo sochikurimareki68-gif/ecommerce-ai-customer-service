@@ -248,9 +248,34 @@ def build_session_opener():
     )
 
 
+def reset_session(base_url: str, opener) -> None:
+    """开跑前清空该会话（丢弃 conversation_id、世代 +1、撤下未结束的工单）。
+
+    多轮组的每一组都必须是独立会话：上一组若在第二轮触发转人工，服务端会把该会话
+    置为「人工接管中」，后续提问只入工单、不再调模型；不清空就会出现「上一题转人工、
+    下一题整组空回复」的假失败。
+    """
+    req = urllib.request.Request(
+        base_url.rstrip("/") + "/api/reset",
+        data=b"{}",
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with opener.open(req, timeout=15) as resp:
+            resp.read()
+    except Exception:
+        # 清空失败不阻断评测：新 CookieJar 本身已是新会话，这里只是兜底
+        pass
+
+
 def run_multi_case(case: dict, base_url: str, forbidden: list[str]) -> dict:
-    """连发两轮，第二轮命中 expect_any 即视为读懂了上下文。"""
+    """连发两轮，第二轮命中 expect_any 即视为读懂了上下文。
+
+    每组一个全新 CookieJar + 开跑前 reset，组与组之间不共享会话状态。
+    """
     opener = build_session_opener()
+    reset_session(base_url, opener)
     replies: list[str] = []
     latencies: list[float] = []
     ttfts: list[float] = []

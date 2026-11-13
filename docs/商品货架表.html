@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>优眠家居 · 商品货架表</title>
+<style>
+  :root{
+    --bg:#f7f4ee;
+    --card:#fffdfa;
+    --ink:#2b2a27;
+    --muted:#7c7670;
+    --line:#e7e1d7;
+    --accent:#9a6b43;
+    --suite:#b07a4a;
+    --quilt:#71865f;
+    --pillow:#66798f;
+    --protect:#8a748f;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 500px at 10% -10%, #efe6d8 0%, rgba(239,230,216,0) 60%),
+      radial-gradient(900px 420px at 100% 0%, #ece9e0 0%, rgba(236,233,224,0) 55%),
+      var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    line-height:1.6;
+    font-size:15px;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 24px 64px}
+  header.hero{margin-bottom:28px}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:8px;
+    font-size:12px;letter-spacing:.14em;color:var(--accent);
+    text-transform:uppercase;font-weight:600;
+  }
+  .eyebrow::before{content:"";width:26px;height:1px;background:var(--accent);display:inline-block}
+  h1{
+    margin:10px 0 8px;
+    font-size:34px;line-height:1.25;letter-spacing:-.01em;font-weight:700;
+  }
+  .sub{color:var(--muted);font-size:14px;margin:0}
+  .sub code{
+    background:#efe9df;border-radius:4px;padding:1px 5px;font-size:12.5px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+
+  /* summary */
+  .summary{
+    display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:26px 0 8px;
+  }
+  .stat{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    padding:16px 18px;box-shadow:0 1px 0 rgba(43,42,39,.03);
+  }
+  .stat .k{font-size:12px;color:var(--muted);letter-spacing:.04em}
+  .stat .v{font-size:26px;font-weight:700;margin-top:4px;font-variant-numeric:tabular-nums}
+  .stat .v small{font-size:13px;font-weight:500;color:var(--muted);margin-left:4px}
+  .stat .d{font-size:12px;color:var(--muted);margin-top:2px}
+
+  .legend{
+    margin:16px 0 30px;padding:12px 16px;border-radius:12px;
+    background:#fbf8f2;border:1px dashed var(--line);color:var(--muted);font-size:13px;
+  }
+  .legend b{color:var(--ink);font-weight:600}
+
+  /* category */
+  .cat{margin:38px 0 0}
+  .cat-head{
+    display:flex;flex-wrap:wrap;align-items:baseline;gap:10px;
+    padding-bottom:10px;border-bottom:2px solid var(--line);
+  }
+  .cat-head h2{
+    margin:0;font-size:21px;font-weight:700;letter-spacing:.01em;
+    display:flex;align-items:center;gap:9px;
+  }
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .cat-suite .dot{background:var(--suite)}
+  .cat-quilt .dot{background:var(--quilt)}
+  .cat-pillow .dot{background:var(--pillow)}
+  .cat-protect .dot{background:var(--protect)}
+  .cat-meta{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums}
+  .howto{
+    margin:14px 0 14px;padding:12px 16px;border-radius:12px;
+    background:var(--card);border:1px solid var(--line);font-size:13.5px;
+    display:flex;gap:10px;align-items:flex-start;
+  }
+  .howto .tag{
+    flex:0 0 auto;font-size:11px;letter-spacing:.08em;font-weight:700;
+    color:#fff;background:var(--accent);border-radius:999px;padding:3px 9px;margin-top:2px;
+  }
+  .cat-suite .howto .tag{background:var(--suite)}
+  .cat-quilt .howto .tag{background:var(--quilt)}
+  .cat-pillow .howto .tag{background:var(--pillow)}
+  .cat-protect .howto .tag{background:var(--protect)}
+
+  /* table */
+  .tablewrap{
+    background:var(--card);border:1px solid var(--line);border-radius:14px;
+    overflow:auto;box-shadow:0 1px 0 rgba(43,42,39,.03);
+  }
+  table{border-collapse:collapse;width:100%;min-width:860px}
+  thead th{
+    position:sticky;top:0;z-index:2;background:#f4efe6;
+    text-align:left;font-size:12px;letter-spacing:.06em;color:#5f594f;
+    font-weight:700;padding:11px 14px;border-bottom:1px solid var(--line);white-space:nowrap;
+  }
+  tbody td{padding:13px 14px;border-bottom:1px solid #f0ebe2;vertical-align:top;font-size:13.5px}
+  tbody tr:last-child td{border-bottom:none}
+  tbody tr:nth-child(even){background:#fdfbf7}
+  tbody tr:hover{background:#faf5ec}
+  .pname{font-weight:650;white-space:nowrap}
+  .pname span{display:block;font-weight:400;color:var(--muted);font-size:12px;margin-top:1px;white-space:nowrap}
+  .param{color:#4a463f}
+  .param b{font-weight:600;color:var(--ink)}
+  .price{font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.75}
+  .price b{font-weight:650}
+  .season{white-space:nowrap;font-variant-numeric:tabular-nums}
+  .sell{color:#5a554d;min-width:150px}
+  .todo{
+    display:inline-block;font-size:11.5px;color:#8a5a17;background:#fbf0d9;
+    border:1px solid #f0dcb4;border-radius:999px;padding:1px 8px;white-space:nowrap;
+  }
+
+  footer{margin-top:44px;padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-size:12.5px}
+  footer p{margin:6px 0}
+  footer b{color:var(--ink)}
+
+  @media (max-width:820px){
+    .wrap{padding:26px 16px 48px}
+    h1{font-size:26px}
+    .summary{grid-template-columns:repeat(2,1fr)}
+  }
+  @media print{
+    body{background:#fff}
+    .wrap{max-width:none;padding:0}
+    .tablewrap{overflow:visible;box-shadow:none}
+    thead th{position:static}
+    .cat{break-inside:avoid}
+    tbody tr{break-inside:avoid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">优眠家居 · 商品货架</div>
+    <h1>店里现在有什么？一页看完 21 款</h1>
+    <p class="sub">按品类分组、组内按起价从低到高。数据全部取自 <code>docs/knowledge-base/upload/02-05</code>，按库内参数逐项录入；枕芯的季节与硬度已按同一示例口径补齐，表中不再有「待补」。</p>
+  </header>
+
+  <section class="summary" aria-label="汇总">
+    <div class="stat">
+      <div class="k">总款数</div>
+      <div class="v">21 <small>款</small></div>
+      <div class="d">4 个品类</div>
+    </div>
+    <div class="stat">
+      <div class="k">品类分布</div>
+      <div class="v" style="font-size:15px;line-height:1.9;font-weight:600">
+        套件 9 · 被芯 5<br>枕芯 4 · 保护套 3
+      </div>
+    </div>
+    <div class="stat">
+      <div class="k">价格带</div>
+      <div class="v">¥129–¥1299</div>
+      <div class="d">最低 ¥129（记忆棉枕 / 1.2m 防水保护套）</div>
+    </div>
+    <div class="stat">
+      <div class="k">覆盖季节</div>
+      <div class="v" style="font-size:17px">-5℃ ~ 30℃</div>
+      <div class="d">深冬、秋冬、春秋、夏季与四季款齐全</div>
+    </div>
+  </section>
+
+  <div class="legend">
+    <b>读表说明：</b>「规格与价格」只列库内出现的规格档位与参考价，价格为日常参考价，大促另计、以结算页为准；「适用季节」用库内标注的适用室温或季节档表示。原先 6 处「待补」（4 款枕芯的季节、乳胶与软管的硬度）已按示例口径补齐，表内已无空项。
+  </div>
+
+  <!-- ================= 床品套件 ================= -->
+  <section class="cat cat-suite">
+    <div class="cat-head">
+      <h2><span class="dot"></span>床品套件</h2>
+      <div class="cat-meta">9 款 · ¥179–¥899</div>
+    </div>
+    <div class="howto">
+      <span class="tag">怎么选</span>
+      <div>先按季节与卧室温度定面料：夏季选天丝（24-30℃）、秋冬选磨毛（10-20℃）、深冬或 15℃ 以下选法兰绒（5-15℃），四季通用选 60 支或 100 支纯棉；再按床型选规格（1.2m / 1.5m / 1.8m），最后按预算选档次。</div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="min-width:190px">商品</th>
+            <th style="min-width:250px">材质成分 / 关键参数</th>
+            <th style="min-width:210px">可选规格与价格</th>
+            <th>适用季节</th>
+            <th style="min-width:160px">一句话卖点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="pname">童趣 · 60支纯棉三件套<span>学生款 · 三件套</span></td>
+            <td class="param">100% 棉 · <b>60 支</b> · 密度 <b>173×120</b> · <b>128g/㎡</b></td>
+            <td class="price">1.2m <b>¥179</b><br><span style="color:var(--muted);font-size:12px">被套 150×200 / 床单 200×230 / 枕套 48×74（1 个）</span></td>
+            <td class="season">四季适用</td>
+            <td class="sell">宿舍单人床专用，少一个枕套所以更便宜、耐洗。</td>
+          </tr>
+          <tr>
+            <td class="pname">云柔 · 60支纯棉四件套<span>基础款</span></td>
+            <td class="param">100% 棉 · <b>60 支</b> · 密度 <b>173×120</b> · <b>128g/㎡</b></td>
+            <td class="price">1.2m <b>¥199</b>｜1.5m <b>¥259</b>｜1.8m <b>¥299</b></td>
+            <td class="season">四季适用</td>
+            <td class="sell">柔软透气、价格友好，日常用的性价比首选。</td>
+          </tr>
+          <tr>
+            <td class="pname">暖阳 · 磨毛纯棉四件套<span>秋冬款</span></td>
+            <td class="param">100% 棉（表面磨毛）· <b>40 支</b> · 密度 <b>133×72</b> · <b>165g/㎡</b></td>
+            <td class="price">1.5m <b>¥299</b>｜1.8m <b>¥349</b></td>
+            <td class="season">10-20℃</td>
+            <td class="sell">触感温暖、上床不凉，适合无暖气地区。</td>
+          </tr>
+          <tr>
+            <td class="pname">法兰绒 · 加厚保暖四件套<span>深冬款</span></td>
+            <td class="param">100% 棉（双面起绒）· <b>40 支</b> · 密度 <b>133×72</b> · <b>210g/㎡</b></td>
+            <td class="price">1.5m <b>¥329</b>｜1.8m <b>¥379</b></td>
+            <td class="season">5-15℃</td>
+            <td class="sell">全系最厚，绒层软糯，深冬贴身不凉；易掉毛需反面洗。</td>
+          </tr>
+          <tr>
+            <td class="pname">亲肤 · 有机棉四件套<span>婴儿可用</span></td>
+            <td class="param">100% 有机棉 · <b>60 支</b> · 密度 <b>173×120</b> · <b>130g/㎡</b></td>
+            <td class="price">1.2m <b>¥359</b>｜1.5m <b>¥429</b>｜1.8m <b>¥499</b></td>
+            <td class="season">四季适用</td>
+            <td class="sell">无荧光剂、通过 OEKO-TEX，宝宝与敏感肌可用。</td>
+          </tr>
+          <tr>
+            <td class="pname">清风 · 天丝四件套<span>夏季款</span></td>
+            <td class="param">100% 莱赛尔（天丝）· <b>60 支</b> · 密度 <b>173×120</b> · <b>110g/㎡</b></td>
+            <td class="price">1.5m <b>¥399</b>｜1.8m <b>¥459</b></td>
+            <td class="season">24-30℃</td>
+            <td class="sell">全系最薄，凉感顺滑、吸湿透气，空调房不闷汗。</td>
+          </tr>
+          <tr>
+            <td class="pname">云裳 · 100支长绒棉四件套<span>品质款</span></td>
+            <td class="param">100% 长绒棉 · <b>100 支</b> · 密度 <b>230×140</b> · <b>145g/㎡</b></td>
+            <td class="price">1.5m <b>¥499</b>｜1.8m <b>¥599</b></td>
+            <td class="season">18-26℃</td>
+            <td class="sell">丝滑有光泽，100 支长绒棉，包装精美适合送礼。</td>
+          </tr>
+          <tr>
+            <td class="pname">云端 · 100支长绒棉六件套<span>礼盒款</span></td>
+            <td class="param">100% 长绒棉 · <b>100 支</b> · 密度 <b>230×140</b> · <b>145g/㎡</b></td>
+            <td class="price">1.5m <b>¥799</b>｜1.8m <b>¥899</b></td>
+            <td class="season">四季通用（18-26℃ 舒适）</td>
+            <td class="sell">六件含 2 个抱枕套，礼盒包装可定制刺绣，婚庆乔迁体面。</td>
+          </tr>
+          <tr>
+            <td class="pname">尊享 · 100支埃及长绒棉四件套<span>高端款</span></td>
+            <td class="param">100% 埃及长绒棉 · <b>100 支</b> · 密度 <b>230×140</b> · <b>150g/㎡</b></td>
+            <td class="price">1.8m <b>¥899</b></td>
+            <td class="season">18-26℃</td>
+            <td class="sell">全系最高端，触感细腻顺滑；仅 1.8m，部分颜色需调货。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= 被芯 ================= -->
+  <section class="cat cat-quilt">
+    <div class="cat-head">
+      <h2><span class="dot"></span>被芯系列</h2>
+      <div class="cat-meta">5 款 · ¥159–¥1299</div>
+    </div>
+    <div class="howto">
+      <span class="tag">怎么选</span>
+      <div>先按季节定款：夏季选夏凉天丝被，春秋选大豆纤维被，想一床四季可用选蚕丝被或子母二合一被，冬季顶配选 95% 白鹅绒被；再按尺寸与预算筛选。羽绒、蚕丝按填充物与蓬松度计价，不能按克重横向比价。</div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="min-width:190px">商品</th>
+            <th style="min-width:280px">填充物 / 净重（200×230cm 口径）</th>
+            <th style="min-width:210px">可选规格与价格</th>
+            <th>适用室温</th>
+            <th style="min-width:160px">一句话卖点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="pname">夏凉 · 天丝夏凉被<span>夏季款</span></td>
+            <td class="param">面料 100% 莱赛尔；填充 100% 聚酯纤维（中空）· <b>500g（1 斤）</b></td>
+            <td class="price">150×200 <b>¥159</b>｜200×230 <b>¥199</b></td>
+            <td class="season">20-28℃</td>
+            <td class="sell">凉感透气可机洗，空调房盖着不闷；无 220×240。</td>
+          </tr>
+          <tr>
+            <td class="pname">暖芯 · 大豆纤维被<span>春秋款</span></td>
+            <td class="param">大豆蛋白纤维 30% + 涤纶 70% · <b>2200g（4.4 斤）</b></td>
+            <td class="price">150×200 <b>¥199</b>｜200×230 <b>¥249</b>｜220×240 <b>¥299</b></td>
+            <td class="season">10-20℃</td>
+            <td class="sell">柔软亲肤、可机洗，被芯里起价最低的一款。</td>
+          </tr>
+          <tr>
+            <td class="pname">柔肤 · 100% 桑蚕丝被<span>四季款</span></td>
+            <td class="param">100% 桑蚕丝（长丝）· <b>1500g（3 斤，保暖约等于 6 斤棉被）</b></td>
+            <td class="price">150×200 <b>¥899</b>｜200×230 <b>¥1099</b>｜220×240 <b>¥1249</b></td>
+            <td class="season">15-25℃</td>
+            <td class="sell">贴身透气、吸湿亲肤，南方潮湿地区友好；不可水洗。</td>
+          </tr>
+          <tr>
+            <td class="pname">子母 · 蚕丝+大豆二合一被<span>全年款</span></td>
+            <td class="param">薄层 100% 桑蚕丝 <b>500g</b> + 厚层大豆纤维 <b>1800g</b>，合计 <b>2300g（4.6 斤）</b></td>
+            <td class="price">200×230 <b>¥699</b>｜220×240 <b>¥899</b></td>
+            <td class="season">5-25℃</td>
+            <td class="sell">薄被夏天、厚被春秋、拉链拼起来过冬，一床顶三季。</td>
+          </tr>
+          <tr>
+            <td class="pname">暖眠 · 95% 白鹅绒被<span>冬季顶配</span></td>
+            <td class="param">95% 白鹅绒 + 5% 羽，蓬松度 800+ · 充绒 <b>1100g（2.2 斤）</b></td>
+            <td class="price">150×200 <b>¥799</b>｜200×230 <b>¥999</b>｜220×240 <b>¥1299</b></td>
+            <td class="season">-5~10℃</td>
+            <td class="sell">轻盈保暖、一床过冬不压身；蛋白过敏者不建议使用。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= 枕芯 ================= -->
+  <section class="cat cat-pillow">
+    <div class="cat-head">
+      <h2><span class="dot"></span>枕芯系列</h2>
+      <div class="cat-meta">4 款 · ¥129–¥399</div>
+    </div>
+    <div class="howto">
+      <span class="tag">怎么选</span>
+      <div>按睡姿与颈椎状态选：仰睡用偏低的一档（记忆棉 10cm、鹅绒 8-10cm），侧睡用偏高的一档（10-12cm 的 12cm 档，肩宽取上限）；要支撑选记忆棉或乳胶，要随时调高度选软管枕，要柔软低枕选鹅绒。</div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="min-width:190px">商品</th>
+            <th style="min-width:290px">填充 / 尺寸 · 枕高 · 硬度</th>
+            <th style="min-width:150px">规格与价格</th>
+            <th>适用季节</th>
+            <th style="min-width:170px">一句话卖点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="pname">舒颈 · 记忆棉枕<span>护颈款</span></td>
+            <td class="param">慢回弹记忆棉，密度 50D · 50×30cm · 枕高 <b>10-12cm</b> 可调 · 硬度 <b>中等偏硬</b></td>
+            <td class="price">50×30cm <b>¥129</b></td>
+            <td class="season">四季通用（冬季不凉、夏季略蓄热）</td>
+            <td class="sell">贴合颈椎曲线，仰睡 10cm、侧睡 12cm；枕套可拆洗、枕芯不可水洗。</td>
+          </tr>
+          <tr>
+            <td class="pname">弹棉 · 天然乳胶枕<span>透气款</span></td>
+            <td class="param">天然乳胶含量 93%+，密度 60D · 60×40cm · 枕高 <b>10-12cm</b> · 硬度 <b>偏硬（支撑型）</b></td>
+            <td class="price">60×40cm <b>¥199</b></td>
+            <td class="season">四季通用 · 偏透气</td>
+            <td class="sell">弹性好、结构致密，配合高密度枕套可减少尘螨藏匿；适合侧睡与喜欢支撑感的人，乳胶过敏者不建议用。</td>
+          </tr>
+          <tr>
+            <td class="pname">随心 · 软管调节枕<span>可调节款</span></td>
+            <td class="param">食品级 PE 软管 · 60×40cm · 三档枕高 <b>8 / 10 / 12cm</b> · 硬度 <b>可调</b>（满填充偏硬，取出软管变软变低）</td>
+            <td class="price">60×40cm <b>¥299</b></td>
+            <td class="season">四季通用 · 可调</td>
+            <td class="sell">高度可自己调，取出约一袋软管降 1cm，睡姿多变的人好用。</td>
+          </tr>
+          <tr>
+            <td class="pname">云朵 · 95% 鹅绒枕<span>柔软款</span></td>
+            <td class="param">95% 白鹅绒，充绒 700g · 48×74cm · 枕高 <b>8-10cm</b> · 硬度 <b>柔软</b></td>
+            <td class="price">48×74cm <b>¥399</b></td>
+            <td class="season">秋冬为主（保暖蓬松，夏季偏热）</td>
+            <td class="sell">柔软蓬松的低枕体验；可机洗轻柔、≤50℃ 低温烘干，蛋白过敏者不建议用。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= 床垫保护套 ================= -->
+  <section class="cat cat-protect">
+    <div class="cat-head">
+      <h2><span class="dot"></span>床垫保护套</h2>
+      <div class="cat-meta">3 款 · ¥129–¥249</div>
+    </div>
+    <div class="howto">
+      <span class="tag">怎么选</span>
+      <div>按季节与是否需要防水选：要防水防尿、有宝宝或养宠选纯棉防水款（三款里唯一覆盖 1.2m）；夏季怕热选天丝凉感款（无防水膜，只做凉感隔脏）；冬季保暖选磨毛加厚款。</div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="min-width:190px">商品</th>
+            <th style="min-width:270px">材质成分 / 关键参数</th>
+            <th style="min-width:210px">可选规格与价格</th>
+            <th>适用季节</th>
+            <th style="min-width:180px">一句话卖点</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="pname">纯棉防水床垫保护套<span>防尿款</span></td>
+            <td class="param">表层 100% 棉 · <b>60 支</b> · <b>128g/㎡</b> · 复合 TPU 防水膜</td>
+            <td class="price">1.2m <b>¥129</b>｜1.5m <b>¥169</b>｜1.8m <b>¥199</b></td>
+            <td class="season">全年适用</td>
+            <td class="sell">三款中唯一防水防尿，且唯一覆盖 1.2m。</td>
+          </tr>
+          <tr>
+            <td class="pname">磨毛加厚床垫保护套<span>保暖款</span></td>
+            <td class="param">100% 棉（表面磨毛）· <b>40 支</b> · <b>175g/㎡</b></td>
+            <td class="price">1.5m <b>¥159</b>｜1.8m <b>¥199</b></td>
+            <td class="season">10-20℃</td>
+            <td class="sell">三款中最厚，隔脏与保暖一体，冬天床垫不冰。</td>
+          </tr>
+          <tr>
+            <td class="pname">天丝凉感床垫保护套<span>夏季款</span></td>
+            <td class="param">100% 莱赛尔（天丝）· <b>110g/㎡</b> · 不含防水膜</td>
+            <td class="price">1.5m <b>¥199</b>｜1.8m <b>¥249</b></td>
+            <td class="season">24-30℃</td>
+            <td class="sell">三款中最薄，凉感透气；不防水，不能替代防尿款。</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer>
+    <p><b>数据来源：</b><code>docs/knowledge-base/upload/02-床品套件.md</code>、<code>03-被芯系列.md</code>、<code>04-枕芯系列.md</code>、<code>05-床垫保护套系列.md</code>，尺寸口径与 <code>01-品牌认证与规格.md</code> 一致。</p>
+    <p><b>口径说明：</b>支数、密度、克重、填充量、缩水率与价格均为演示用示例参数（行业常见合理值），不对应真实检测报告；价格为日常参考价，活动价与库存以详情页、结算页为准。</p>
+    <p><b>待补：</b>0 处 —— 原先 6 处（4 款枕芯适用季节、乳胶与软管硬度）已按示例口径补齐，并同步写入 <code>upload/04-枕芯系列.md</code> 与 <code>upload/14-选购知识.md</code>；库内其余「待补」项未在表内出现，保持原样。</p>
+  </footer>
+
+</div>
+</body>
+</html>

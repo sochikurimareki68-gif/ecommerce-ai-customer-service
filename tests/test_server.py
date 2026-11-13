@@ -652,6 +652,25 @@ class PumpStreamTest(unittest.TestCase):
         self.assertEqual(kinds, ["error"])
         self.assertIn("超时", json.loads(fake.events[0][1])["message"])
 
+    def test_slots_snapshot_echo_is_stripped_from_reply(self):
+        """扣子偶尔会把注入的 [SLOTS_JSON] 快照原样回显，不能漏给用户。"""
+        fake = FakeSse()
+        head = json.dumps({"conversation_id": "c1", "role": "assistant",
+                           "type": "answer", "content": "亲，您指的是哪款商品呢。\n[SLOT"},
+                          ensure_ascii=False)
+        tail = json.dumps({"conversation_id": "c1", "role": "assistant",
+                           "type": "answer", "content": 'S_JSON]{"sku":"枕芯"}'},
+                          ensure_ascii=False)
+        resp = _sse_lines(
+            ("conversation.message.delta", head),
+            ("conversation.message.delta", tail),
+            ("done", "[DONE]"),
+        )
+        server.Handler._pump_stream(fake, resp, "token")
+        deltas = [json.loads(d)["content"] for e, d in fake.events if e == "delta"]
+        self.assertEqual("".join(deltas), "亲，您指的是哪款商品呢。\n")
+        self.assertNotIn("SLOTS_JSON", "".join(deltas))
+
     def test_handoff_reply_emits_handoff_event(self):
         """命中转接话术时要下发 handoff 事件，前端才能展示排队状态。"""
         with server.PENDING_HANDOFF_LOCK:
@@ -946,6 +965,14 @@ class FaqCacheTest(unittest.TestCase):
         log.assert_called_once()
         self.assertEqual(log.call_args[0][0], "cache_skip")
         self.assertEqual(log.call_args[1]["reason"], "negative")
+
+    def test_switch_off_bypasses_cache(self):
+        """自测开关：FAQ_CACHE_ENABLED=0 时读写都绕开缓存。"""
+        reply = "亲，面料为 60支纯棉，柔软透气，性价比高，适合日常使用。"
+        with mock.patch.object(server, "FAQ_CACHE_ENABLED", False):
+            server.faq_cache_put("q", reply, "商品咨询")
+            self.assertIsNone(server.faq_cache_get("q"))
+            self.assertEqual(server.FAQ_CACHE, {})
 
 
 if __name__ == "__main__":

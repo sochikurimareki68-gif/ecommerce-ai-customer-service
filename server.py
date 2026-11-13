@@ -90,12 +90,15 @@ HOST = os.environ.get("HOST", "0.0.0.0")
 #
 # 都是单实例内存实现（Render 免费版只有一个实例，够用）。全部可用环境变量覆盖。
 # ----------------------------------------------------------------------
-MAX_BODY_BYTES = int(os.environ.get("MAX_BODY_BYTES", "4096"))
-MAX_MESSAGE_CHARS = int(os.environ.get("MAX_MESSAGE_CHARS", "500"))
-IP_PER_MINUTE = int(os.environ.get("IP_PER_MINUTE", "6"))
-IP_PER_DAY = int(os.environ.get("IP_PER_DAY", "60"))
-GLOBAL_PER_DAY = int(os.environ.get("GLOBAL_PER_DAY", "500"))
-HEALTH_PER_MINUTE = int(os.environ.get("HEALTH_PER_MINUTE", "30"))
+# 测试期默认值已放宽，保证连续自测不被限流打断；上线时请用环境变量收回：
+#   IP_PER_MINUTE=6  IP_PER_DAY=60  GLOBAL_PER_DAY=500
+#   MAX_MESSAGE_CHARS=500  MAX_BODY_BYTES=4096  HEALTH_PER_MINUTE=30
+MAX_BODY_BYTES = int(os.environ.get("MAX_BODY_BYTES", "16384"))
+MAX_MESSAGE_CHARS = int(os.environ.get("MAX_MESSAGE_CHARS", "2000"))
+IP_PER_MINUTE = int(os.environ.get("IP_PER_MINUTE", "60"))
+IP_PER_DAY = int(os.environ.get("IP_PER_DAY", "2000"))
+GLOBAL_PER_DAY = int(os.environ.get("GLOBAL_PER_DAY", "5000"))
+HEALTH_PER_MINUTE = int(os.environ.get("HEALTH_PER_MINUTE", "120"))
 # P2-4 成本指标：扣子 v3 流式不返回 token 用量，按字符数本地估算（中文 1 字≈1 token，英文≈4 字符 1 token）。
 # 价格单位：元 / 千 token，默认按豆包 Pro 输入 0.0008、输出 0.002，可在 .env 覆盖。
 COZE_IN_PRICE = float(os.environ.get("COZE_IN_PRICE", "0.0008"))
@@ -106,6 +109,10 @@ PROMPT_OVERHEAD_TOK = int(os.environ.get("PROMPT_OVERHEAD_TOK", "300"))
 # 首问判定用轮次而不是 epoch：epoch 在 reset 后会持续 +1，用它判首问会导致「清空对话」后再也不命中缓存。
 FAQ_CACHE_TTL = int(os.environ.get("FAQ_CACHE_TTL", "3600"))
 FAQ_CACHE_MAX = int(os.environ.get("FAQ_CACHE_MAX", "200"))
+# 自测时设 FAQ_CACHE_ENABLED=0 可完全绕开缓存，确保每次提问都真的走模型；线上保持开启。
+FAQ_CACHE_ENABLED = os.environ.get("FAQ_CACHE_ENABLED", "1").strip().lower() not in (
+    "0", "false", "no", "off",
+)
 
 # 数值守卫：默认开启，NUMERIC_GUARD_ENABLED=0 可单独关闭灰度。
 NUMERIC_GUARD_ENABLED = os.environ.get("NUMERIC_GUARD_ENABLED", "1").strip().lower() not in (
@@ -665,6 +672,54 @@ def split_no_answer_stream(buffer: str) -> tuple[str, str]:
     return buffer, ""
 
 
+# 槽位快照 [SLOTS_JSON]{...} 是注入给扣子的助手消息，模型偶尔会把它原样回显，
+# 一旦漏给前端就成了用户可见的裸 JSON。这里在流式与整段两条路径上都剥掉。
+SLOTS_SNAPSHOT_RE = re.compile(r"\[SLOTS_JSON\]\s*\{[^{}]*\}")
+_SLOTS_HEAD = "[SLOTS_JSON]"
+
+
+def split_slots_stream(buffer: str) -> tuple[str, str]:
+    """流式剥除 [SLOTS_JSON]{...}：返回 (可下发内容, 继续暂扣的尾部)。"""
+    out = []
+    while True:
+        idx = buffer.find(_SLOTS_HEAD)
+        if idx == -1:
+            # 尾部可能是标记的前半截，暂扣到下一块再判断
+            hold = 0
+            for size in range(min(len(buffer), len(_SLOTS_HEAD) - 1), 0, -1):
+                if _SLOTS_HEAD.startswith(buffer[-size:]):
+                    hold = size
+                    break
+            if hold:
+                out.append(buffer[:-hold])
+                return "".join(out), buffer[-hold:]
+            out.append(buffer)
+            return "".join(out), ""
+        out.append(buffer[:idx])
+        rest = buffer[idx:]
+        end = rest.find("}")
+        if end == -1:
+            newline = rest.find("\n")
+            if newline == -1:
+                return "".join(out), rest
+            buffer = rest[newline + 1:]   # 不是完整 JSON，按行丢弃
+            continue
+        buffer = rest[end + 1:]
+
+
+def strip_slots_snapshot(text: str) -> str:
+    """整段剥除槽位快照；未闭合的半截也一并丢弃。"""
+    text = SLOTS_SNAPSHOT_RE.sub("", text)
+    idx = text.find(_SLOTS_HEAD)
+    if idx != -1:
+        text = text[:idx]
+    for size in range(min(len(text), len(_SLOTS_HEAD) - 1), 0, -1):
+        if _SLOTS_HEAD.startswith(text[-size:]):
+            text = text[:-size]
+            break
+    return text
+
+
 def infer_branch(message: str, reply: str) -> str:
     """按关键词命中数推断分支。回复内容权重高于用户消息；平分时按 BRANCH_ORDER 取先。"""
     best = ""
@@ -808,6 +863,8 @@ NEGATIVE_ANSWER_RE = re.compile(
 
 
 def faq_cache_get(key: str) -> tuple[str, str] | None:
+    if not FAQ_CACHE_ENABLED:
+        return None
     with FAQ_CACHE_LOCK:
         item = FAQ_CACHE.get(key)
         if not item:
@@ -832,6 +889,8 @@ def cache_skip_reason(reply: str) -> str:
 
 
 def faq_cache_put(key: str, reply: str, branch: str) -> None:
+    if not FAQ_CACHE_ENABLED:
+        return
     reason = cache_skip_reason(reply)
     if reason:
         # 明确记录「跳过写缓存」：与「没命中缓存」区分开，便于线上排查坏答案固化。
@@ -1526,6 +1585,14 @@ class Handler(BaseHTTPRequestHandler):
         self._sse_start()
         try:
             self._pump_stream(resp, token, epoch, message)
+            if not self._chat_reply and not self._chat_handoff:
+                # 上游只回了空流（没有任何 delta）：不能 200 + 空 body 收场，
+                # 否则前端是空气泡、排查时连 SSE 事件都没有。这里补一条兜底话术。
+                log_guard_event("empty_stream", msg_len=len(message))
+                self._chat_reply = NO_ANSWER_REPLY
+                self._chat_branch = self._chat_branch or "其他兜底"
+                self._sse_send("delta", json.dumps({"content": NO_ANSWER_REPLY}, ensure_ascii=False))
+                self._sse_send("branch", json.dumps({"branch": self._chat_branch}, ensure_ascii=False))
             # P2-4 FAQ 缓存：首问且成功拿到非空回复、且未转人工时写入缓存，下次同问题直接回放。
             if first_turn and self._chat_reply and not self._chat_handoff:
                 faq_cache_put(cache_key, self._chat_reply, self._chat_branch)
@@ -1632,6 +1699,8 @@ class Handler(BaseHTTPRequestHandler):
                     # 方案 B：标记要等攒齐再判断，先扣住可能是 [[NO_ANSWER]] 前缀的尾部
                     stream_pending += piece
                     visible, stream_pending = split_no_answer_stream(stream_pending)
+                    visible, held_slots = split_slots_stream(visible)
+                    stream_pending = held_slots + stream_pending
                     if visible and not sent_delta and not visible.strip():
                         # 还没发过正文时，纯空白也先留着，避免把「只含标记」误判成已有实质内容
                         stream_pending = visible + stream_pending
@@ -1665,6 +1734,7 @@ class Handler(BaseHTTPRequestHandler):
                 for m in NO_ANSWER_MARKERS:
                     tail = tail.replace(m, "")
                 tail = GENERIC_PLACEHOLDER_RE.sub("", tail)
+                tail = strip_slots_snapshot(tail)
             for chunk in guard_stream.feed(tail):
                 emit(chunk)
             stream_pending = ""
@@ -1687,7 +1757,7 @@ class Handler(BaseHTTPRequestHandler):
                 # 解析失败不能把 JSON 原样丢给用户，给一句明确的提示
                 self._sse_send("error", json.dumps({"message": "回复格式异常，请再发送一次～"}, ensure_ascii=False))
                 return
-            reply_text = replace_no_answer_marker(reply)
+            reply_text = strip_slots_snapshot(replace_no_answer_marker(reply))
             if reply.strip() == NO_ANSWER_MARKER:
                 fallback = fact_fallback_reply(message)
                 if fallback:
@@ -1708,7 +1778,7 @@ class Handler(BaseHTTPRequestHandler):
 
         # 极端情况：没有增量（例如只给了完成事件），一次性补发
         if not sent_delta and completed_answer:
-            reply_text = replace_no_answer_marker(completed_answer)
+            reply_text = strip_slots_snapshot(replace_no_answer_marker(completed_answer))
             if completed_answer.strip() == NO_ANSWER_MARKER:
                 fallback = fact_fallback_reply(message)
                 if fallback:

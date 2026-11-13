@@ -20,9 +20,10 @@ DEFAULT_INDEX_PATH = Path(__file__).resolve().parent / "data" / "kb_fact_index.j
 
 # 意图词表。刻意不收「多久」「几天」这类离开上下文就有歧义的词。
 INTENT_WORDS: dict[str, tuple[str, ...]] = {
-    "price": ("多少钱", "价格", "报价", "售价", "价位", "几块钱", "贵不贵", "便宜吗", "¥", "￥"),
-    "size": ("尺寸", "多大", "几米", "1.2米", "1.5米", "1.8米", "1.2m", "1.5m", "1.8m",
-             "被套", "床单", "枕套", "规格"),
+    "price": ("多少钱", "价格", "报价", "售价", "标价", "卖多少", "价位", "几块钱", "贵不贵", "便宜吗", "¥", "￥"),
+    # 「被套/床单/枕套」是商品名词不是尺寸意图词，留在表里会把「买四件套送枕套吗」
+    # 误判成尺寸问题，进而命中尺寸对照表。尺寸只认明确的尺寸词。
+    "size": ("尺寸", "多大", "几米", "1.2米", "1.5米", "1.8米", "1.2m", "1.5m", "1.8m", "规格"),
     "weight": ("克重", "g/㎡", "多厚", "厚不厚", "厚度"),
     "thread": ("支数", "几支", "多少支", "密度", "根/英寸"),
     "shrink": ("缩水",),
@@ -38,6 +39,7 @@ INTENT_WORDS: dict[str, tuple[str, ...]] = {
     "promo": ("满减", "优惠", "券", "会员", "折扣", "活动价", "几折", "打折"),
     "markup": ("加价", "定制费", "刺绣", "定制"),
     "contact": ("联系", "电话", "微信", "客服电话"),
+    "address": ("改地址", "修改地址", "地址填错", "填错地址", "收货地址", "改收货信息", "改电话"),
     "store": ("门店", "实体店", "加盟", "线下店", "线下门店"),
     "cod": ("货到付款", "到付"),
     "freeship": ("包邮", "运费"),
@@ -128,10 +130,55 @@ _SECTION_HINTS: dict[str, tuple[str, ...]] = {
     "thread": ("参数", "支数"),
     "bulk": ("团购", "起订"),
     "contact": ("联系",),
+    "address": ("订单信息", "地址", "联系电话"),
     "feature": ("防水", "透气", "防螨", "面料"),
 }
 # 没点名时，通用问题优先命中非细分段落。
 _QUALIFIERS = ("预售", "定制", "调货", "大促", "活动", "批量", "团购")
+
+# 问题点名了具体主题时，条目必须真的覆盖该主题，否则一律不命中（宁可交给模型）。
+# 这些主题原先会被「签收 / 清洗 / 枕套」这类泛词拉进相近条目，出现答非所问。
+# 每组内是「或」，组间是「且」：例如问换货时长，条目必须同时有「换货」和时效口径。
+_TOPIC_GATES: tuple[tuple[re.Pattern[str], tuple[tuple[str, ...], ...]], ...] = (
+    (re.compile(r"到账|退款.{0,4}(多久|几天|时效|时间)|多久.{0,4}退款"),
+     (("退款",), ("工作日", "小时", "到账"))),
+    # 「退换货要几天」问的是退换期限，不是换货物流时长，必须排除在门外。
+    (re.compile(r"(?<!退)换货.{0,6}(多久|几天|时效)|(多久|几天).{0,6}(?<!退)换货|一来一回"),
+     (("换货",), ("小时", "工作日"))),
+    (re.compile(r"赠送|送(?!货|达)|包含|配件|几件|几套"),
+     (("含", "配置", "赠"),)),
+    # 问到面料/材质时，价格表、尺寸表不能顶上来（宁可不命中）。
+    (re.compile(r"面料|材质"), (("面料", "材质"),)),
+    # 问到能不能拆洗时，条目必须真的写了拆洗口径。
+    (re.compile(r"拆洗|可拆|拆下|能拆|拆开"), (("拆",),)),
+    # 浮毛/掉毛/起球是独立问题，面料卖点段不能抢答。
+    (re.compile(r"浮毛|掉毛|起球"), (("浮毛", "掉毛", "起球"),)),
+    # 问到晾晒方式时，条目必须给出晾晒口径。
+    (re.compile(r"晾|晒"), (("晾", "晒"),)),
+    (re.compile(r"渍"), (("渍",),)),
+)
+
+# 咖啡、茶、油、血等具体污渍：条目正文（答复/例外）必须真的提到污渍处理，
+# 只在兜底句里写「特殊污渍转人工」不算覆盖，否则又会拿通用洗护段答非所问。
+_STAIN_RE = re.compile(r"咖啡|茶渍|油渍|血渍|果汁|红酒|污渍|弄脏|洒了")
+
+
+def _stain_ok(message: str, entry: dict) -> bool:
+    if not _STAIN_RE.search(message):
+        return True
+    core = str(entry.get("answer") or "") + str(entry.get("exception") or "")
+    if "污渍" in core or "去渍" in core:
+        return True
+    return any(word in core for word in ("咖啡", "茶", "油", "血", "果汁", "红酒"))
+
+# 「几天/多久」只有在问退换期限时才优先 7 天口径；
+# 问到账、换货、寄回、发出、运费时不能拿 7 天条款顶。
+_DEADLINE_ASK_RE = re.compile(r"几天|多久|期限|无理由|能退吗|可以退吗")
+_NOT_DEADLINE_RE = re.compile(
+    r"到账|退款.{0,4}(多久|几天|时效|时间)|(多久|几天).{0,4}退款|"
+    r"(?<!退)换货.{0,4}(多久|几天|时效)|(多久|几天).{0,4}(?<!退)换货|"
+    r"一来一回|寄回|发出|运费|补发"
+)
 
 # 商品名过于泛化，不能单独当作线索。
 _GENERIC_ALIASES = {
@@ -257,6 +304,17 @@ def _presence_check(message: str, entry: dict) -> bool:
     return "规格" in answer
 
 
+def _topic_gate_ok(message: str, entry: dict) -> bool:
+    """问题点名了具体主题（到账、换货时效、赠品、污渍）时，条目必须覆盖该主题。"""
+    text = _entry_text(entry)
+    for pattern, groups in _TOPIC_GATES:
+        if not pattern.search(message):
+            continue
+        if not all(any(word in text for word in group) for group in groups):
+            return False
+    return True
+
+
 def match_fact(message: str, index: dict) -> dict | None:
     """返回命中的条目与拼好的回复；未命中返回 None。
 
@@ -291,6 +349,7 @@ def match_fact(message: str, index: dict) -> dict | None:
 
     best = None
     second = 0.0
+    second_entry = None
     for entry in index.get("entries") or []:
         entry_intents = _entry_intents(entry)
         shared = intents & entry_intents
@@ -315,6 +374,10 @@ def match_fact(message: str, index: dict) -> dict | None:
             continue
         if not _presence_check(message, entry):
             continue
+        if not _topic_gate_ok(message, entry):
+            continue
+        if not _stain_ok(message, entry):
+            continue
 
         topic = " ".join((section, " ".join(entry.get("questions") or [])))
         cov = max(_coverage(message, topic), 0.5 * _coverage(message, _entry_text(entry)))
@@ -326,7 +389,8 @@ def match_fact(message: str, index: dict) -> dict | None:
         )
         deadline_hit = (
             "return" in shared
-            and ("几天" in msg_norm or "多久" in msg_norm)
+            and bool(_DEADLINE_ASK_RE.search(msg_norm))
+            and not _NOT_DEADLINE_RE.search(msg_norm)
             and "7 天" in (entry.get("answer") or "")
         )
         answer_word_hit = any(
@@ -356,15 +420,19 @@ def match_fact(message: str, index: dict) -> dict | None:
         if not any(q in msg_norm for q in _QUALIFIERS):
             if any(q in section for q in _QUALIFIERS):
                 score -= 6.0
-        # 「退换货要几天」这类问题点名了期限，优先 7 天口径原文。
-        if "return" in shared and ("几天" in msg_norm or "多久" in msg_norm):
+        # 「退换货要几天」这类问题点名了期限，优先 7 天口径原文；
+        # 问到账/换货/寄回/运费时不加权，避免 7 天条款盖住时效条目。
+        if ("return" in shared and _DEADLINE_ASK_RE.search(msg_norm)
+                and not _NOT_DEADLINE_RE.search(msg_norm)):
             if "7 天" in (entry.get("answer") or ""):
                 score += 15.0
         if best is None or score > best[0]:
             second = best[0] if best else 0.0
+            second_entry = best[1] if best else None
             best = (score, entry, shared)
         elif score > second:
             second = score
+            second_entry = entry
 
     if best is None:
         return None
@@ -372,8 +440,16 @@ def match_fact(message: str, index: dict) -> dict | None:
     if score < 12.0:
         return None
     # 只有两个不同条目分数接近时才判歧义；同一商品的相邻段落允许略低。
+    # 同一商品的两个段落（规格、价格与浮毛说明 / 参数与工艺）本来就该由前者回答，
+    # 不能因为分差不到 2 分就整条放掉，否则「1.5m 有标价吗」这类问法会漏命中。
     if second and score - second < 2.0 and second >= 12.0:
-        return None
+        same_product_pair = bool(
+            entry.get("product")
+            and second_entry is not None
+            and second_entry.get("product") == entry.get("product")
+        )
+        if not same_product_pair:
+            return None
 
     answer = (entry.get("answer") or "").strip()
     if not answer or "[[NO_ANSWER" in answer:

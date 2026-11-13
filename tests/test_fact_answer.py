@@ -109,6 +109,38 @@ class FactMatchTest(unittest.TestCase):
         for message, section in cases.items():
             self.assertEqual(self.hit(message)["entry"]["section"], section, message)
 
+    def test_topic_mismatch_falls_back_to_model(self):
+        """答非所问清单：赠品、污渍、面料、拆洗、浮毛类知识库没有对应口径时，宁可放行给模型。"""
+        for message in (
+            "买四件套送枕套吗",
+            "咖啡渍怎么洗",
+            "床单上洒了咖啡怎么洗掉？",
+            "枕芯外套是什么面料，能拆下来洗吗？",
+            "床垫保护套 1.8m 的面料和厚度是什么？",
+            "磨毛套件洗完浮毛怎么弄掉，能晾在外面晒吗？",
+        ):
+            self.assert_miss(message)
+
+    def test_refund_timing_hits_refund_entry_not_7_day_clause(self):
+        entry = self.hit("退货签收后几天到账")["entry"]
+        self.assertIn("退款", entry["answer"])
+        self.assertNotEqual(entry["section"], "适用条件与除外商品")
+
+    def test_exchange_timing_hits_exchange_entry(self):
+        entry = self.hit("换货一来一回多久")["entry"]
+        self.assertIn("换货", entry["answer"])
+
+    def test_address_change_is_answered_directly(self):
+        entry = self.hit("地址填错能改吗")["entry"]
+        self.assertEqual(entry["file"], "07-物流与发货.md")
+        self.assertIn("人工客服", entry["answer"])
+
+    def test_price_with_size_phrase_hits_same_product_entry(self):
+        """同一商品两个相邻段落分差小，不能误判歧义放掉。"""
+        entry = self.hit("暖阳1.5m有标价吗")["entry"]
+        self.assertEqual(entry["product"], "暖阳·磨毛纯棉四件套（秋冬款）")
+        self.assertIn("¥299", entry["answer"])
+
     def test_comparison_and_purchase_advice_are_not_intercepted(self):
         for message in ("云柔和暖阳哪个好", "推荐一款适合送人的", "性价比高的四件套多少钱"):
             self.assert_miss(message)

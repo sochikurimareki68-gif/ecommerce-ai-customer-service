@@ -6,7 +6,7 @@
 > **自动生成事实区** —— 由 `scripts/gen_readme_facts.py` 从代码、数据集与评测报告生成，**请勿手改**；校验命令：`python3 scripts/gen_readme_facts.py --check`。
 >
 > - 版本：v2.0.3（`server.py` 的 `__version__`）
-> - 单元测试：157 条
+> - 单元测试：164 条
 > - 评测用例：单轮 31 / 多轮 5 / 事实 12 / 安全 6 / 记忆 2
 > - 对话流：意图识别 → 检索 LLM 节点 5 个（5 类提示词共用同一份公共基座）→ 变量聚合、节点会话历史 5 轮、智能体上下文 10 轮
 > - 最新评测（v2.0.3，2026-10-25 23:53）：关键信息覆盖率 100.0%、回复规范性 100.0%；分支归属一致率 83.9%（关键词推断，仅供参考、不计入验收）
@@ -164,12 +164,13 @@ open http://localhost:3000       # macOS
 | `COZE_BOT_ID` | `7694865098007035940` | 智能体 ID |
 | `COZE_API_BASE` | `https://api.coze.cn` | 接口域名（国际版用 `https://api.coze.com`） |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | 监听端口与地址 |
-| `MAX_BODY_BYTES` | `4096` | 单次请求体上限（字节） |
-| `MAX_MESSAGE_CHARS` | `500` | 单条消息最大字符数 |
-| `IP_PER_MINUTE` | `6` | 单 IP 每分钟提问上限 |
-| `IP_PER_DAY` | `60` | 单 IP 每天提问上限 |
-| `GLOBAL_PER_DAY` | `500` | 全站每日提问总量上限（兜底止损） |
-| `HEALTH_PER_MINUTE` | `30` | 单 IP 每分钟 `/api/health` 上限（独立计数，不占提问额度） |
+| `MAX_BODY_BYTES` | `16384` | 单次请求体上限（字节）；上线建议 `4096` |
+| `MAX_MESSAGE_CHARS` | `2000` | 单条消息最大字符数；上线建议 `500` |
+| `IP_PER_MINUTE` | `60` | 单 IP 每分钟提问上限；上线建议 `6` |
+| `IP_PER_DAY` | `2000` | 单 IP 每天提问上限；上线建议 `60` |
+| `GLOBAL_PER_DAY` | `5000` | 全站每日提问总量上限（兜底止损）；上线建议 `500` |
+| `HEALTH_PER_MINUTE` | `120` | 单 IP 每分钟 `/api/health` 上限（独立计数，不占提问额度）；上线建议 `30` |
+| `FAQ_CACHE_ENABLED` | `1` | 设为 `0` 关闭 FAQ 首问缓存（自测时确保每次都走模型） |
 | `ALLOWED_ORIGINS` | （空） | 额外允许的来源域名，逗号分隔 |
 | `COZE_CA_BUNDLE` | （空） | 自定义 CA 证书路径；本地证书校验失败（certificate verify failed）时手动指定 |
 | `COOKIE_SECURE` | （空） | 强制给会话 Cookie 加 `Secure`（`1`/`true`/`yes`）；留空则按请求的 `X-Forwarded-Proto` 自动判断（HTTPS 部署自动加，本地不加） |

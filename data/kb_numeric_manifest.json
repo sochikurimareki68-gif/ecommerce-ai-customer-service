@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generated_from": "upload",
-  "file_count": 15,
+  "file_count": 14,
   "metric_keys": [
     "dry_temp_c",
     "iron_temp_c",
@@ -2328,24 +2328,6 @@
               ]
             }
           }
-        }
-      ]
-    },
-    {
-      "id": "15",
-      "name": "商品别名与口语对照",
-      "file": "15-商品别名与口语对照.md",
-      "aliases": [
-        "商品别名与口语对照"
-      ],
-      "shared_metrics": {},
-      "products": [
-        {
-          "name": "全部商品别名",
-          "aliases": [
-            "全部商品别名"
-          ],
-          "metrics": {}
         }
       ]
     }

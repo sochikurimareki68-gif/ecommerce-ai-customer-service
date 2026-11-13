@@ -43,8 +43,8 @@ class ManifestTest(unittest.TestCase):
         self.assertEqual(self.manifest, build_manifest(UPLOAD_DIR))
 
     def test_manifest_covers_all_knowledge_files(self):
-        self.assertEqual(self.manifest["file_count"], 15)
-        self.assertEqual(len(self.manifest["categories"]), 15)
+        self.assertEqual(self.manifest["file_count"], 14)
+        self.assertEqual(len(self.manifest["categories"]), 14)
 
     def test_mattress_protector_wash_temperature(self):
         category = next(c for c in self.manifest["categories"] if c["id"] == "05")

@@ -440,5 +440,33 @@ class FactChatHttpTest(unittest.TestCase):
         )
 
 
+class AskCoverageTest(unittest.TestCase):
+    """命中必须覆盖问句的关键要素：答不全就放行给模型，不许直返半截。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.index = K.load_index(ROOT / "data" / "kb_fact_index.json")
+
+    def test_when_7day_starts_must_mention_signing(self):
+        result = K.match_fact("7天无理由从什么时候开始算？", self.index)
+        if result is not None:
+            self.assertIn("签收", result["reply"])
+
+    def test_pillow_no_reason_must_mention_pillow(self):
+        result = K.match_fact("枕芯可以7天无理由退货吗？", self.index)
+        if result is not None:
+            self.assertIn("枕芯", result["reply"])
+
+    def test_stack_question_must_answer_stack(self):
+        result = K.match_fact("满减能和优惠券叠加吗？", self.index)
+        if result is not None:
+            self.assertIn("叠加", result["reply"])
+
+    def test_matched_answer_is_verbatim_for_stack(self):
+        result = K.match_fact("满减能和优惠券叠加吗？", self.index)
+        self.assertIsNotNone(result)
+        self.assertIn("满减活动与优惠券可以叠加", result["reply"])
+
+
 if __name__ == "__main__":
     unittest.main()

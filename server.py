@@ -109,8 +109,9 @@ PROMPT_OVERHEAD_TOK = int(os.environ.get("PROMPT_OVERHEAD_TOK", "300"))
 # 首问判定用轮次而不是 epoch：epoch 在 reset 后会持续 +1，用它判首问会导致「清空对话」后再也不命中缓存。
 FAQ_CACHE_TTL = int(os.environ.get("FAQ_CACHE_TTL", "3600"))
 FAQ_CACHE_MAX = int(os.environ.get("FAQ_CACHE_MAX", "200"))
-# 自测时设 FAQ_CACHE_ENABLED=0 可完全绕开缓存，确保每次提问都真的走模型；线上保持开启。
-FAQ_CACHE_ENABLED = os.environ.get("FAQ_CACHE_ENABLED", "1").strip().lower() not in (
+# 默认关闭（一致优先）：缓存会让同一问题在不同轮次拿到本地旧答复，与扣子原话不一致。
+# 代码保留，线上需要省额度时用 FAQ_CACHE_ENABLED=1 开回来。
+FAQ_CACHE_ENABLED = os.environ.get("FAQ_CACHE_ENABLED", "0").strip().lower() not in (
     "0", "false", "no", "off",
 )
 # 静态文件白名单：只服务前端资源，其余（.py / .md / .json / .yml / 目录）一律 404
@@ -118,8 +119,9 @@ STATIC_EXTENSIONS = {
     ".html", ".css", ".js", ".svg", ".png", ".jpg", ".jpeg", ".ico", ".webp", ".woff2", ".map",
 }
 
-# 数值守卫：默认开启，NUMERIC_GUARD_ENABLED=0 可单独关闭灰度。
-NUMERIC_GUARD_ENABLED = os.environ.get("NUMERIC_GUARD_ENABLED", "1").strip().lower() not in (
+# 数值守卫：默认关闭（一致优先）：守卫会把模型原话整段替换成兜底话术，
+# 与「线上回复与智能体原话口径一致」冲突。需要防错数字时用 NUMERIC_GUARD_ENABLED=1 开回来。
+NUMERIC_GUARD_ENABLED = os.environ.get("NUMERIC_GUARD_ENABLED", "0").strip().lower() not in (
     "0", "false", "no", "off",
 )
 NUMERIC_MANIFEST = None
@@ -136,11 +138,14 @@ except (OSError, ValueError) as exc:
         ensure_ascii=False,
     ))
 
-# 确定性回答层（L1）：价格、规格、克重、水温、时限等结构化事实直接查本地索引返回，
-# 命中时不调用扣子。FACT_ANSWER_ENABLED=0 关闭命中直返，FACT_FALLBACK_ENABLED=0 关闭兜底。
-FACT_ANSWER_ENABLED = os.environ.get("FACT_ANSWER_ENABLED", "1").strip().lower() not in (
+# 确定性回答层（L1）：价格、规格、克重、水温、时限等结构化事实直接查本地索引返回。
+# 默认关闭（一致优先）：命中直返会让这一轮绕开扣子，回复口径与智能体原话不一致，
+# 该轮也不会进入扣子会话。代码保留，需要省额度时用 FACT_ANSWER_ENABLED=1 开回来。
+FACT_ANSWER_ENABLED = os.environ.get("FACT_ANSWER_ENABLED", "0").strip().lower() not in (
     "0", "false", "no", "off",
 )
+# 兜底必须保留（默认开启）：模型空回复或只回 [[NO_ANSWER]] 时，用知识库原文/转人工话术
+# 顶上，否则用户看到的是空气泡或裸标记。它不是加工层，只在异常时生效，不影响正常轮次一致性。
 FACT_FALLBACK_ENABLED = os.environ.get("FACT_FALLBACK_ENABLED", "1").strip().lower() not in (
     "0", "false", "no", "off",
 )
@@ -174,7 +179,7 @@ EXTRA_ORIGINS = [
 _PROCESS_START = time.time()
 
 # G4：README 事实区从这里读版本号；G2 的心跳字段也依赖下面的状态
-__version__ = "2.0.3"
+__version__ = "2.0.4"
 
 # ----------------------------------------------------------------------
 # G2 防复发闸门（2026-11-09）：keepalive 配了但没生效
@@ -1497,6 +1502,9 @@ class Handler(BaseHTTPRequestHandler):
                 section=entry.get("section", ""),
                 score=fact.get("score"),
             )
+            # 直返的这轮不会进扣子会话，槽位必须本地留存：否则「前面说的订单尾号」
+            # 这类记忆追问在下一轮调模型时就断了（本轮省了调用，但不能丢上下文）。
+            SESSIONS.merge_slots(token, extract_slots(message))
             SESSIONS.record_turn(token, message, reply, epoch)
             self._sse_start()
             self._sse_send("delta", json.dumps({"content": reply}, ensure_ascii=False))

@@ -158,6 +158,44 @@ _TOPIC_GATES: tuple[tuple[re.Pattern[str], tuple[tuple[str, ...], ...]], ...] = 
     (re.compile(r"渍"), (("渍",),)),
 )
 
+# 问句点名了「起算时间 / 某品类能不能无理由退 / 能不能叠加」时，直返的答复必须覆盖这些要素；
+# 覆盖不到就放行给模型——宁可慢，也不能拿相邻段落答半截（问签收起算却只答退换条件）。
+_START_ASK_RE = re.compile(r"(从|自)?(什么时候|哪天|几号|何时).{0,6}(算|起)|起算|从哪天|开始算")
+_RETURN_ASK_RE = re.compile(r"无理由|七天|7\s*天|能退|可以退|退货|退换")
+_START_WORDS = ("签收", "起算", "次日", "第1天", "第 1 天")
+_STACK_RE = re.compile(r"叠加|一起用|同时用|同享|并用")
+_STACK_SUBJECTS = ("满减", "优惠券", "会员", "新客", "秒杀")
+
+
+def _ask_coverage_ok(message: str, entry: dict) -> bool:
+    """问题点名的关键要素必须能在条目原文里找到，否则不命中。
+
+    只看 answer（实际直返给用户的那段）：例外段里写了但答复没写，等于没答到。
+    """
+    text = str(entry.get("answer") or "")
+    msg = normalize(message)
+
+    if _START_ASK_RE.search(message) and _RETURN_ASK_RE.search(message):
+        if not any(word in text for word in _START_WORDS):
+            return False
+
+    if _RETURN_ASK_RE.search(message):
+        category = _detect_category(msg)
+        if category:
+            words = next((w for c, w in _CATEGORY_RULES if c == category), ())
+            spoken = [w for w in words if normalize(w) in msg]
+            if spoken and not any(w in text for w in spoken):
+                return False
+
+    if _STACK_RE.search(message):
+        if "叠加" not in text:
+            return False
+        for subject in _STACK_SUBJECTS:
+            if subject in message and subject not in text:
+                return False
+
+    return True
+
 # 咖啡、茶、油、血等具体污渍：条目正文（答复/例外）必须真的提到污渍处理，
 # 只在兜底句里写「特殊污渍转人工」不算覆盖，否则又会拿通用洗护段答非所问。
 _STAIN_RE = re.compile(r"咖啡|茶渍|油渍|血渍|果汁|红酒|污渍|弄脏|洒了")
@@ -375,6 +413,8 @@ def match_fact(message: str, index: dict) -> dict | None:
         if not _presence_check(message, entry):
             continue
         if not _topic_gate_ok(message, entry):
+            continue
+        if not _ask_coverage_ok(message, entry):
             continue
         if not _stain_ok(message, entry):
             continue

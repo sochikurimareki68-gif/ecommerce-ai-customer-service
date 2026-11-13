@@ -138,6 +138,14 @@ class FindViolationTest(unittest.TestCase):
 
 
 class NumericGuardStreamTest(unittest.TestCase):
+    # 守卫默认关闭（一致优先），这里显式打开，保证机制本身仍被覆盖。
+    def setUp(self):
+        self._enabled = server.NUMERIC_GUARD_ENABLED
+        server.NUMERIC_GUARD_ENABLED = True
+
+    def tearDown(self):
+        server.NUMERIC_GUARD_ENABLED = self._enabled
+
     def test_plain_text_is_not_buffered(self):
         guard = server.NumericGuardStream("床垫保护套怎么洗")
         self.assertEqual(guard.feed("你好"), ["你好"])
@@ -186,6 +194,13 @@ class PlaceholderTest(unittest.TestCase):
 
 
 class PumpStreamGuardTest(unittest.TestCase):
+    def setUp(self):
+        self._enabled = server.NUMERIC_GUARD_ENABLED
+        server.NUMERIC_GUARD_ENABLED = True
+
+    def tearDown(self):
+        server.NUMERIC_GUARD_ENABLED = self._enabled
+
     def _run(self, content: str, message: str, structured: bool = False):
         token, _, _, _ = server.SESSIONS.resolve("")
         fake = FakeSse()

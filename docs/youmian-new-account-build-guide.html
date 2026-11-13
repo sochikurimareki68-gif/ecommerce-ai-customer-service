@@ -531,7 +531,7 @@ B. 知识库查不到答案、检索为空或明确超出范围：先用软话�
                     <li>在编排页找到「对话流」配置区（有的界面在「技能 / 工作流」里叫「对话流」）。</li>
                     <li>选择 <span class="highlight">youmian_assistant_chatflow</span>，不要选 <code>loomi_recommend_flow_1</code>。</li>
                     <li>模式选 <b>单 Agent · 对话流模式</b>。不要选「规划模式」——规划模式会多一轮判断，还可能不执行对话流。</li>
-                    <li>「携带上下文轮数」填 <span class="highlight">10</span>。这个开关和第 2.3 步的「会话历史」是一对，少一个多轮就会失忆。</li>
+                    <li>「携带上下文轮数」填 <span class="highlight">10</span>。它是总闸，但只有大模型节点的输入模块引用「智能体对话历史」参数时才生效；节点自己的「会话历史」是另一层，五个检索节点统一设为 <span class="highlight">5 轮</span>。</li>
                 </ol>
 
                 <div class="tip">
@@ -657,7 +657,7 @@ B. 知识库查不到答案、检索为空或明确超出范围：先用软话�
                     <div class="checklist-item"><input type="checkbox"> 结束节点＝返回文本、回答内容 <code>{{output}}</code>、流式输出已开</div>
                     <div class="checklist-item"><input type="checkbox"> 画布三条节点两条线：开始 → 大模型 → 结束</div>
                     <div class="checklist-item"><input type="checkbox"> 对话流已发布，记下版本号（首版 v0.0.1）</div>
-                    <div class="checklist-item"><input type="checkbox"> 智能体＝对话流模式、上下文 10 轮、已发布到 API 渠道，bot_id 仍为 7706539492081270810</div>
+                    <div class="checklist-item"><input type="checkbox"> 智能体＝对话流模式、携带上下文轮数 10、五个检索节点「会话历史」各 5 轮、已发布到 API 渠道，bot_id 仍为 7706539492081270810</div>
                     <div class="checklist-item"><input type="checkbox"> 第 10 节 4 条验证全部通过，回答原文与召回片段已留档</div>
                     <div class="checklist-item"><input type="checkbox"> 剩余积分没有被试运行/重复重试烧掉</div>
                 </div>

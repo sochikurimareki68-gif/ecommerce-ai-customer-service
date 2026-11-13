@@ -105,9 +105,10 @@ def build_block() -> str:
         f"多轮 {counts.get('multi', 0)} / 事实 {counts.get('facts', 0)} / "
         f"安全 {counts.get('security', 0)} / 记忆 {counts.get('memory', 0)}",
         f"> - 对话流：意图识别 → 检索 LLM 节点 {arch['llm_nodes']} 个"
-        f"（{arch['intent_domains']} 类提示词共用同一份公共基座）→ 变量聚合、"
-        f"节点会话历史 {arch['history_rounds']} 轮、智能体上下文 {arch['agent_context_rounds']} 轮",
-        f"> - 最新评测（v{report.get('version', '')}，{report.get('time', '')}）："
+        f"（{arch['intent_domains']} 类提示词共用同一份公共基座）→ 变量聚合；"
+        f"五个检索节点各自「会话历史」{arch['history_rounds']} 轮；智能体「对话设置」携带上下文轮数 "
+        f"{arch['agent_context_rounds']}（节点输入需引用「智能体对话历史」参数才生效）",
+        f"> - 最新评测（v{str(report.get('version', '')).lstrip('v')}，{report.get('time', '')}）："
         f"关键信息覆盖率 {metrics.get('keyword_pct', 0):.1f}%、"
         f"回复规范性 {metrics.get('forbidden_pct', 0):.1f}%；"
         f"分支归属一致率 {metrics.get('route_pct', 0):.1f}%（关键词推断，仅供参考、不计入验收）",

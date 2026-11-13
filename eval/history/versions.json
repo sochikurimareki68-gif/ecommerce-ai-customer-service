@@ -38,5 +38,15 @@
     "forbidden_pct": "100.0%",
     "latency_avg": 9.3,
     "ttft_avg": 8.4
+  },
+  "v2.0.4": {
+    "time": "2026-11-13 23:12",
+    "base": "http://localhost:3010",
+    "total": 31,
+    "route_pct": "93.5%",
+    "keyword_pct": "96.8%",
+    "forbidden_pct": "100.0%",
+    "latency_avg": 10.4,
+    "ttft_avg": 9.1
   }
 }

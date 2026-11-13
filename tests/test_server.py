@@ -994,10 +994,13 @@ class FaqCacheTest(unittest.TestCase):
     """首问缓存只存正常答复：否定性/未命中/占位标记一律跳过，避免坏答案被固化。"""
 
     def setUp(self):
+        self._enabled = server.FAQ_CACHE_ENABLED
+        server.FAQ_CACHE_ENABLED = True   # 缓存默认关闭（一致优先），这里显式打开验证机制
         server.FAQ_CACHE.clear()
 
     def tearDown(self):
         server.FAQ_CACHE.clear()
+        server.FAQ_CACHE_ENABLED = self._enabled
 
     def test_negative_answers_are_not_cached(self):
         cases = [

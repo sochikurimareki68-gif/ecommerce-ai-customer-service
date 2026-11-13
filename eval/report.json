@@ -1,17 +1,17 @@
 {
   "schema": 1,
-  "version": "2.0.3",
-  "time": "2026-10-25 23:53",
-  "base": "http://localhost:3000",
+  "version": "v2.0.4",
+  "time": "2026-11-13 23:12",
+  "base": "http://localhost:3010",
   "total": 31,
   "succeeded": 31,
   "failed": 0,
   "metrics": {
-    "keyword_pct": 100.0,
+    "keyword_pct": 96.8,
     "forbidden_pct": 100.0,
-    "route_pct": 83.9,
-    "latency_avg": 9.3,
-    "ttft_avg": 8.4
+    "route_pct": 93.5,
+    "latency_avg": 10.4,
+    "ttft_avg": 9.1
   },
   "counts": {
     "single": 31,

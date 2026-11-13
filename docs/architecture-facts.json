@@ -3,5 +3,6 @@
   "llm_nodes": 5,
   "intent_domains": 5,
   "history_rounds": 5,
-  "agent_context_rounds": 10
+  "agent_context_rounds": 10,
+  "_context_rounds_note": "上下文轮数分两层：智能体「对话设置」的携带上下文轮数=10，是总闸；只有大模型节点输入模块引用「智能体对话历史」参数时才生效。五个检索节点各自的「会话历史」窗口=5（原 3，已改）。哪一层实际生效取决于节点有没有引用该参数，以平台实际行为为准，不要断言取小值。后端 HANDOFF_CONTEXT_ROUNDS=5 是转人工队列留存，语义不同，勿混用。"
 }

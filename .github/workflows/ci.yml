@@ -24,7 +24,9 @@ jobs:
         run: |
           python -m py_compile server.py
           python -m py_compile kb_numeric_guard.py
+          python -m py_compile kb_fact_answer.py
           python -m py_compile scripts/gen_kb_numeric_manifest.py
+          python -m py_compile scripts/gen_kb_fact_index.py
           python -m py_compile eval/run_eval.py
 
       - name: 单元测试
@@ -52,6 +54,8 @@ jobs:
       - name: G5 简历日期与 git 一致
         run: python scripts/resume_dates.py
 
-      # G6：数值清单必须与知识库同步；改了知识库数字却没重跑生成脚本时，直接失败并列出差异
-      - name: G6 数值清单与知识库同步
-        run: python scripts/gen_kb_numeric_manifest.py --check
+      # G6：数值清单与事实索引都必须与知识库同步；改了知识库却没重跑生成脚本时，直接失败并列出差异
+      - name: G6 数值清单与事实索引同步
+        run: |
+          python scripts/gen_kb_numeric_manifest.py --check
+          python scripts/gen_kb_fact_index.py --check

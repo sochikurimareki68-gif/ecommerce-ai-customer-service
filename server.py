@@ -51,6 +51,10 @@ from kb_numeric_guard import (  # noqa: E402  （同目录模块，必须在 ROO
     find_violation as find_numeric_violation,
     load_manifest as load_numeric_manifest,
 )
+from kb_fact_answer import (  # noqa: E402  （同目录模块，必须在 ROOT 之后导入）
+    load_index as load_fact_index,
+    match_fact,
+)
 
 
 def load_dotenv(path: Path) -> None:
@@ -118,6 +122,28 @@ try:
 except (OSError, ValueError) as exc:
     print(json.dumps(
         {"level": "guard", "kind": "manifest_load_failed", "error": str(exc)},
+        ensure_ascii=False,
+    ))
+
+# 确定性回答层（L1）：价格、规格、克重、水温、时限等结构化事实直接查本地索引返回，
+# 命中时不调用扣子。FACT_ANSWER_ENABLED=0 关闭命中直返，FACT_FALLBACK_ENABLED=0 关闭兜底。
+FACT_ANSWER_ENABLED = os.environ.get("FACT_ANSWER_ENABLED", "1").strip().lower() not in (
+    "0", "false", "no", "off",
+)
+FACT_FALLBACK_ENABLED = os.environ.get("FACT_FALLBACK_ENABLED", "1").strip().lower() not in (
+    "0", "false", "no", "off",
+)
+FACT_INDEX = None
+_FACT_INDEX_PATH = Path(
+    os.environ.get("KB_FACT_INDEX", str(ROOT / "data" / "kb_fact_index.json"))
+)
+if not _FACT_INDEX_PATH.is_absolute():
+    _FACT_INDEX_PATH = ROOT / _FACT_INDEX_PATH
+try:
+    FACT_INDEX = load_fact_index(_FACT_INDEX_PATH)
+except (OSError, ValueError) as exc:
+    print(json.dumps(
+        {"level": "fact", "kind": "index_load_failed", "error": str(exc)},
         ensure_ascii=False,
     ))
 
@@ -659,6 +685,29 @@ def guard_completed_reply(text: str, message: str) -> tuple[str, object]:
     if violation is not None:
         return NO_ANSWER_REPLY, violation
     return text, None
+
+
+def lookup_fact(message: str) -> dict | None:
+    """L1 查表：命中返回 {"reply", "entry", "score"}；未开启或未命中返回 None。"""
+    if not FACT_ANSWER_ENABLED or FACT_INDEX is None or not message:
+        return None
+    try:
+        return match_fact(message, FACT_INDEX)
+    except (KeyError, TypeError, ValueError) as exc:
+        log_guard_event("fact_lookup_failed", error=str(exc))
+        return None
+
+
+def fact_fallback_reply(message: str) -> str:
+    """L3 兜底：扣子空回复或只回标记时，用知识库原文补一段；没命中返回空串。"""
+    if not FACT_FALLBACK_ENABLED or FACT_INDEX is None or not message:
+        return ""
+    try:
+        hit = match_fact(message, FACT_INDEX)
+    except (KeyError, TypeError, ValueError) as exc:
+        log_guard_event("fact_fallback_failed", error=str(exc))
+        return ""
+    return hit["reply"] if hit else ""
 
 
 _STREAM_BOUNDARY_RE = re.compile(r"[。！？!?；;\n，,]")
@@ -1306,6 +1355,37 @@ class Handler(BaseHTTPRequestHandler):
             self._reject(500, "服务端未配置 COZE_API_TOKEN，请先在 .env 中填写")
             return
 
+        # ---- 确定性回答层（L1）：结构化事实直接查本地索引，命中即返回，不调用扣子 ----
+        fact = lookup_fact(message)
+        if fact is not None:
+            reply = fact["reply"]
+            entry = fact.get("entry") or {}
+            self._chat_ttft = round(time.time() - self._req_start, 2)
+            self._chat_reply = reply
+            self._chat_in_tok = 0          # 未调用模型，无输入/输出费用
+            self._chat_out_tok = 0
+            self._chat_guard_blocked = False
+            self._chat_handoff = False
+            self._chat_cache_hit = False
+            self._chat_branch = infer_branch(message, reply)
+            log_guard_event(
+                "fact_hit",
+                file=entry.get("file", ""),
+                section=entry.get("section", ""),
+                score=fact.get("score"),
+            )
+            SESSIONS.record_turn(token, message, reply, epoch)
+            self._sse_start()
+            self._sse_send("delta", json.dumps({"content": reply}, ensure_ascii=False))
+            self._sse_send("branch", json.dumps({"branch": self._chat_branch}, ensure_ascii=False))
+            self._sse_send("done", "[DONE]")
+            try:
+                self._sse_end()
+            except OSError:
+                pass
+            self._emit_chat_log(token, message)
+            return
+
         # 首问判定用会话轮次：reset 会把 turn_count 清零，点过「清空对话」后仍能重新命中缓存
         first_turn = SESSIONS.turn_count(token) == 0
 
@@ -1540,7 +1620,11 @@ class Handler(BaseHTTPRequestHandler):
         if stream_pending:
             marker = stream_pending.strip()
             if not sent_delta and marker in NO_ANSWER_REPLIES:
-                tail = NO_ANSWER_REPLIES[marker]
+                # L3 兜底：普通标记且有知识库原文时，优先回原文；发票标记不覆盖。
+                fallback = "" if marker == NO_ANSWER_INVOICE_MARKER else fact_fallback_reply(message)
+                if fallback:
+                    log_guard_event("fact_fallback", path="marker")
+                tail = fallback or NO_ANSWER_REPLIES[marker]
             elif not sent_delta and GENERIC_PLACEHOLDER_RE.fullmatch(marker):
                 # 未登记的占位符单独出现：不能把空回复丢给用户，按兜底处理
                 log_guard_event("placeholder", markers=[marker], action="fallback")
@@ -1577,6 +1661,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._sse_send("error", json.dumps({"message": "回复格式异常，请再发送一次～"}, ensure_ascii=False))
                 return
             reply_text = replace_no_answer_marker(reply)
+            if reply.strip() == NO_ANSWER_MARKER:
+                fallback = fact_fallback_reply(message)
+                if fallback:
+                    log_guard_event("fact_fallback", path="structured")
+                    reply_text = fallback
             reply_text, violation = guard_completed_reply(reply_text, message)
             if violation is not None:
                 self._chat_guard_blocked = True
@@ -1593,6 +1682,11 @@ class Handler(BaseHTTPRequestHandler):
         # 极端情况：没有增量（例如只给了完成事件），一次性补发
         if not sent_delta and completed_answer:
             reply_text = replace_no_answer_marker(completed_answer)
+            if completed_answer.strip() == NO_ANSWER_MARKER:
+                fallback = fact_fallback_reply(message)
+                if fallback:
+                    log_guard_event("fact_fallback", path="completed")
+                    reply_text = fallback
             reply_text, violation = guard_completed_reply(reply_text, message)
             if violation is not None:
                 self._chat_guard_blocked = True
@@ -1612,8 +1706,14 @@ class Handler(BaseHTTPRequestHandler):
         # 这里改为下发 error，让用户看到明确提示而不是一段沉默。
         # 注意：必须在发 branch 之前拦截，否则失败的请求也会带一个分类标签，污染路由统计。
         if not sent_delta:
-            self._sse_send("error", json.dumps({"message": "响应超时了，请再发送一次～"}, ensure_ascii=False))
-            return
+            # L3 兜底：上游空回复时，知识库有原文就用原文，不再让用户看到空气泡或超时。
+            fallback = fact_fallback_reply(message)
+            if fallback:
+                log_guard_event("fact_fallback", path="empty")
+                emit(fallback)
+            else:
+                self._sse_send("error", json.dumps({"message": "响应超时了，请再发送一次～"}, ensure_ascii=False))
+                return
 
         if not branch:
             # v2.0：结束节点只返回 reply 纯文本，不再有代码节点判定的 branch，按关键词推断

@@ -26,15 +26,25 @@
 ## 界面预览
 
 <p align="center">
-  <img src="docs/images/ui-home.jpg" width="62%" alt="桌面端：品牌介绍 + 客服对话双栏">
-  <img src="docs/images/ui-mobile.jpg" width="24%" alt="移动端：全屏对话">
+  <img src="docs/images/ui-home.jpg" width="100%" alt="桌面端：品牌介绍 + 客服对话双栏">
+  <br>
+  <sub>桌面双栏：左侧品牌区、右侧对话</sub>
 </p>
 
-<p align="center">
-  <img src="docs/images/ui-chat.jpg" width="86%" alt="真实对话效果：意图路由与尺寸推荐">
-  <br>
-  <sub>桌面端为品牌栏 + 对话双栏，窄屏自动收起品牌栏；快捷提问与引用式回答均为真实交互。</sub>
-</p>
+<table>
+  <tr>
+    <td width="68%" align="center" valign="top">
+      <img src="docs/images/ui-chat.jpg" height="360" alt="对话态：点快捷问题后的真实回答">
+      <br>
+      <sub>对话态：点「商品咨询」后的真实回答</sub>
+    </td>
+    <td width="32%" align="center" valign="top">
+      <img src="docs/images/ui-mobile.jpg" height="360" alt="移动端：单列全屏">
+      <br>
+      <sub>移动端：单列全屏</sub>
+    </td>
+  </tr>
+</table>
 
 ## 功能
 

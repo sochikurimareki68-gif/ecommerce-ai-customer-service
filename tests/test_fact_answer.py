@@ -52,8 +52,10 @@ class FactMatchTest(unittest.TestCase):
         self.assertIn("规格 1.5m、1.8m", reply)
 
     def test_bed_size_question_hits_size_table(self):
+        # 2026-11-14 结构加固：四件套尺寸按床型拆成独立条目，
+        # 点名 1.5m 时应命中 1.5m 床条目，而不是总入口。
         entry = self.hit("1.5米床买多大四件套")["entry"]
-        self.assertEqual(entry["section"], "四件套尺寸对照")
+        self.assertEqual(entry["section"], "1.5m 床四件套尺寸")
 
     def test_wash_temperature_hits_product_entry(self):
         entry = self.hit("法兰绒四件套怎么洗")["entry"]
@@ -247,7 +249,8 @@ class CategoryBindingTest(unittest.TestCase):
     def test_key_phrasings_hit_their_own_category_entry(self):
         cases = {
             "四件套尺寸多大": "四件套尺寸对照",
-            "四件套有1.8米的吗": "四件套尺寸对照",
+            # 结构加固后按床型拆分，点名 1.8m 时命中对应的 1.8m 床条目。
+            "四件套有1.8米的吗": "1.8m 床四件套尺寸",
             "枕芯尺寸多大": "枕芯尺寸与枕套匹配",
             "被芯尺寸多大": "被芯尺寸与床宽匹配",
             "床垫保护套有1.8米的吗": "三款床垫保护套规格价",

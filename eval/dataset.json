@@ -14,7 +14,7 @@
   "_multi_turn_comment": "多轮用例：同一 cookie 会话连发 turns 里的两句，第二轮必须命中 expect_any 其一、expect_all 全部，且不得出现 must_not 任一词，才判上下文通过；由 run_eval.py --multi 执行，结果写入 eval/report-multi.md。新增用例必须按 _assertion_rule 同时写 must 与 must_not。",
   "multi_turn_cases": [
     { "id": "M01", "turns": ["天丝床品怎么洗？", "那纯棉的呢？"], "expect_any": ["纯棉", "40"] },
-    { "id": "M02", "turns": ["四件套有什么尺寸？", "1.8 米多少钱？"], "expect_all": ["299", "349"], "expect_any": ["299"], "must_not": ["399", "459"] },
+    { "id": "M02", "turns": ["四件套有什么尺寸？", "1.8 米多少钱？"], "expect_all": ["299", "349"], "expect_any": ["299"], "must_not": ["399", "199"] },
     { "id": "M03", "turns": ["我想退货", "运费谁出？"], "expect_any": ["运费", "承担"] },
     { "id": "M04", "turns": ["多久能发货？", "新疆发吗？"], "expect_any": ["新疆", "EMS", "偏远"] },
     { "id": "M05", "turns": ["现在有什么活动？", "能叠加吗？"], "expect_any": ["叠加"], "must_not": ["不支持叠加", "会员折扣可以和满减", "所有优惠都可以叠加", "全部优惠都能叠加"] }

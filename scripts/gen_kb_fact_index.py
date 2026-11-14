@@ -84,6 +84,7 @@ def build_index(upload_dir: Path = UPLOAD_DIR) -> dict:
         spoken: list[str] = []
         current: dict | None = None
         section_no = 0
+        last_field: str | None = None
 
         def flush() -> None:
             nonlocal current
@@ -95,10 +96,14 @@ def build_index(upload_dir: Path = UPLOAD_DIR) -> dict:
 
         for raw in path.read_text(encoding="utf-8").splitlines():
             line = raw.strip()
+            if not line:
+                last_field = None
+                continue
             if line.startswith("## "):
                 flush()
                 h2 = line[3:].strip()
                 spoken = []
+                last_field = None
             elif line.startswith("### "):
                 flush()
                 section_no += 1
@@ -107,6 +112,7 @@ def build_index(upload_dir: Path = UPLOAD_DIR) -> dict:
                     "file": path.name,
                     "scope": "category",
                     "category": h2,
+                    "group": h2,
                     "product": "",
                     "section": line[4:].strip(),
                     "questions": [],
@@ -120,6 +126,11 @@ def build_index(upload_dir: Path = UPLOAD_DIR) -> dict:
                 if h2 and spoken:
                     current["scope"] = "product"
                     current["product"] = h2
+                last_field = None
+            elif raw[:1].isspace() and last_field and line.startswith("- "):
+                # 字段的续行（结构拆分后的分条内容），连同行首缩进一起保留，
+                # 保证 answer 仍能在原文里逐字回溯。
+                current[last_field] = (current[last_field] + "\n" + raw.rstrip()).strip()
             elif line.startswith(_ALIAS_LINE):
                 spoken = _split_aliases(line[len(_ALIAS_LINE):])
                 if h2 and not any(p["name"] == h2 and p["file"] == path.name for p in products):
@@ -128,16 +139,20 @@ def build_index(upload_dir: Path = UPLOAD_DIR) -> dict:
                         "file": path.name,
                         "aliases": _product_aliases(h2, spoken),
                     })
+                last_field = None
             elif current is not None and line.startswith("- ") and "：" in line:
                 key, _, value = line[2:].partition("：")
                 key, value = key.strip(), value.strip()
                 field = _FIELD_MAP.get(key)
                 if not field:
+                    last_field = None
                     continue
                 if field == "questions":
                     current["questions"] = _split_questions(value)
+                    last_field = None
                 else:
                     current[field] = value
+                    last_field = field
         flush()
 
     for entry in entries:

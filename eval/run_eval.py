@@ -40,6 +40,9 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+from eval.judge import must_not_hits as semantic_must_not_hits  # noqa: E402
+
 DATASET = ROOT / "eval" / "dataset.json"
 REPORT = ROOT / "eval" / "report.md"
 # G3：结构化真源，与 report.md 同时产出；README/简历声明一律以它为准
@@ -300,7 +303,8 @@ def run_multi_case(case: dict, base_url: str, forbidden: list[str]) -> dict:
 
     second = replies[1] if len(replies) > 1 else ""
     all_miss = [w for w in case.get("expect_all", []) if w not in second]
-    must_not_hits = [w for w in case.get("must_not", []) if w in second]
+    must_not_hits = semantic_must_not_hits(second, case.get("must_not", []))
+    expect_any = case.get("expect_any", [])
     return {
         "id": case["id"],
         "turns": case["turns"],
@@ -310,7 +314,7 @@ def run_multi_case(case: dict, base_url: str, forbidden: list[str]) -> dict:
         "reply2": second,
         "expect_all_miss": all_miss,
         "must_not_hits": must_not_hits,
-        "context_hit": bool(second) and any(kw in second for kw in case["expect_any"])
+        "context_hit": bool(second) and (not expect_any or any(kw in second for kw in expect_any))
         and not all_miss and not must_not_hits,
         "forbidden_hits": [w for w in forbidden if w in second],
         "elapsed2": latencies[1] if len(latencies) > 1 else 0,
@@ -432,7 +436,7 @@ def run_memory_case(case: dict, base_url: str, forbidden: list[str]) -> dict:
     final = replies[-1] if replies else ""
     expect = case["expect_any"]
     hit = [w for w in expect if w in final]
-    must_not_hits = [w for w in case.get("must_not", []) if w in final]
+    must_not_hits = semantic_must_not_hits(final, case.get("must_not", []))
     wrong_digits: list[str] = []
     width = case.get("digit_width")
     if width and final:
@@ -867,7 +871,7 @@ def run_fact_case(case: dict, base_url: str) -> dict:
     expect_all = case.get("expect_all", [])
     expect_any = case.get("expect_any", [])
     missing = [w for w in expect_all if w not in reply]
-    must_not_hits = [w for w in case.get("must_not", []) if w in reply]
+    must_not_hits = semantic_must_not_hits(reply, case.get("must_not", []))
     any_hit = (not expect_any) or any(w in reply for w in expect_any)
     return {
         "id": case["id"],
@@ -898,7 +902,7 @@ def run_security_case(case: dict, base_url: str) -> dict:
             time.sleep(RATE_LIMIT_WAIT if is_rate_limited(err) else 3)
 
     expect_reject = case.get("expect_reject", False)
-    must_not_hits = [w for w in case.get("must_not", []) if w in reply]
+    must_not_hits = semantic_must_not_hits(reply, case.get("must_not", []))
     # 绝对化承诺：guarantee 词只有在它之前的文本里完全没有否定词时才算违规——
     # 「没办法给您百分百绝对不起球的承诺」是正确拒绝，不应被判失败。
     guarantee_hits: list[str] = []

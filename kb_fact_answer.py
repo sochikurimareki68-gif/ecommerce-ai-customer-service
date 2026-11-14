@@ -78,7 +78,22 @@ _PREFERRED_SECTIONS: dict[str, tuple[tuple[str, str], ...]] = {
     "promo": (("会员", "会员等级与折扣"), ("满减", "满减档位与新人券"), ("券", "优惠券领取与使用")),
     "markup": (("刺绣", "定制 LOGO 与颜色尺寸"), ("logo", "定制 LOGO 与颜色尺寸")),
     "leadtime": (("定制", "预售、定制与调货发货时效"), ("预售", "预售、定制与调货发货时效")),
-    "size": (("被芯", "被芯尺寸与床宽匹配"), ("被套", "四件套尺寸对照"), ("床单", "四件套尺寸对照")),
+    "size": (
+        ("被芯", "被芯尺寸与床宽匹配"),
+        ("被套", "四件套尺寸对照"),
+        ("床单", "四件套尺寸对照"),
+        ("保护套", "三款床垫保护套规格价"),
+        ("床垫", "三款床垫保护套规格价"),
+    ),
+    "wash": (
+        ("被芯", "被芯的清洁方式"),
+        ("羽绒被", "被芯的清洁方式"),
+        ("蚕丝被", "被芯的清洁方式"),
+        ("枕芯", "枕芯的清洁方式"),
+        ("枕头", "枕芯的清洁方式"),
+        ("乳胶枕", "枕芯的清洁方式"),
+        ("记忆棉", "枕芯的清洁方式"),
+    ),
     "feature": (("防水", "三款面料与季节差异"), ("透气", "三款面料与季节差异")),
 }
 
@@ -388,6 +403,7 @@ def match_fact(message: str, index: dict) -> dict | None:
     best = None
     second = 0.0
     second_entry = None
+    ranked: list[tuple[float, dict, set[str]]] = []
     for entry in index.get("entries") or []:
         entry_intents = _entry_intents(entry)
         shared = intents & entry_intents
@@ -484,6 +500,7 @@ def match_fact(message: str, index: dict) -> dict | None:
                 and not _NOT_DEADLINE_RE.search(msg_norm)):
             if "7 天" in (entry.get("answer") or ""):
                 score += 15.0
+        ranked.append((score, entry, shared))
         if best is None or score > best[0]:
             second = best[0] if best else 0.0
             second_entry = best[1] if best else None
@@ -497,6 +514,34 @@ def match_fact(message: str, index: dict) -> dict | None:
     score, entry, shared = best
     if score < 12.0:
         return None
+    # 同一组拆分成「一款一条」的条目，在问题没有点名具体款/规格时合并作答。
+    # 例：泛问「被芯多少钱」会让五款并列同分，若按歧义放行就退回模型随机取行；
+    # 合并后逐款列出，正好对应拆分前的整段答复，且每款仍各自独立成条。
+    group = entry.get("group") or ""
+    siblings = [
+        item for item_score, item, _ in ranked
+        if item_score >= score - 2.0
+        and item_score >= 12.0
+        and item.get("file") == entry.get("file")
+        and group
+        and (item.get("group") or "") == group
+    ]
+    if (len(siblings) > 1 and product is None
+            and not any(q in msg_norm for q in _QUALIFIERS)):
+        order = {id(item): i for i, item in enumerate(index.get("entries") or [])}
+        siblings.sort(key=lambda item: order.get(id(item), 0))
+        answers: list[str] = []
+        for item in siblings:
+            text = (item.get("answer") or "").strip()
+            if text and text not in answers:
+                answers.append(text)
+        if len(answers) > 1:
+            return {
+                "reply": "亲，" + "\n".join(answers),
+                "entry": entry,
+                "score": round(score, 2),
+                "intents": sorted(shared),
+            }
     # 只有两个不同条目分数接近时才判歧义；同一商品的相邻段落允许略低。
     # 同一商品的两个段落（规格、价格与浮毛说明 / 参数与工艺）本来就该由前者回答，
     # 不能因为分差不到 2 分就整条放掉，否则「1.5m 有标价吗」这类问法会漏命中。

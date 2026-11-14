@@ -55,6 +55,11 @@ from kb_fact_answer import (  # noqa: E402  （同目录模块，必须在 ROOT 
     load_index as load_fact_index,
     match_fact,
 )
+from kb_price_lookup import (  # noqa: E402  （同目录模块，必须在 ROOT 之后导入）
+    build_price_snapshot,
+    load_default_table as load_default_price_table,
+    match_price,
+)
 
 
 def load_dotenv(path: Path) -> None:
@@ -160,6 +165,23 @@ try:
 except (OSError, ValueError) as exc:
     print(json.dumps(
         {"level": "fact", "kind": "index_load_failed", "error": str(exc)},
+        ensure_ascii=False,
+    ))
+
+# 价格前置查数：问价时先从「14-价格速查」查到该款该规格的准确价，作为参考上下文
+# 随请求送给扣子，让模型照数字组织语言。默认开启；PRICE_HINT_ENABLED=0 退回原行为。
+# 只在价格问法且款名能唯一定位时注入：有规格给单档价，无规格给该款全部有价规格；
+# 款名省略时可从最近用户原话补主语。查不到就原样转发，不猜、不就近顶替。
+PRICE_HINT_ENABLED = os.environ.get("PRICE_HINT_ENABLED", "1").strip().lower() not in (
+    "0", "false", "no", "off",
+)
+# 省略问法（「1.8 米多少钱」）补主语时，最多回看最近几条用户原话；
+# 直接读现有会话历史，不另建存储。回看越远越容易串款，默认 3 轮。
+PRICE_CONTEXT_TURNS = max(1, int(os.environ.get("PRICE_CONTEXT_TURNS", "3")))
+PRICE_TABLE = load_default_price_table()
+if PRICE_TABLE is None:
+    print(json.dumps(
+        {"level": "guard", "kind": "price_table_load_failed"},
         ensure_ascii=False,
     ))
 
@@ -589,6 +611,38 @@ BRANCH_ORDER = ("商品咨询", "洗护指南", "物流发货", "退换售后", 
 # 回复里出现这些话术说明这轮实际转人工了（分支仍按内容归为「其他兜底」，与评测期望一致）
 HANDOFF_MARKERS = ("正在为您转接", "转接人工客服")
 
+# 只有「确定性转接」才算真转人工：客套式、条件式提及（如「也可转接人工客服复核」）
+# 不算，否则模型一句补充说明就会把整段会话锁死。
+HANDOFF_CLAIM_RE = re.compile(
+    r"(正在|已经|已|立即|马上|即刻)[^，,。！？!?；;\n]{0,6}转接|为您转接"
+)
+HANDOFF_SOFT_RE = re.compile(
+    r"(也可|也可以|可以|如需|如果|若|必要时|建议|或者|或可|复核|自行|可转接|可为您转接)"
+)
+
+
+def is_handoff_reply(text: str) -> bool:
+    """判断回复是否包含可信的转人工信号。
+
+    逐分句检查：既要有「正在/已/立即/马上/即刻……转接」这类确定语气，
+    或整句以「转接人工客服」开头，又不能带「也可/可以/如需/复核」等
+    客套或条件词。这样「正在为您转接人工客服」会成立，
+    「也可转接人工客服复核」不会成立。
+    """
+    if not text:
+        return False
+    for clause in re.split(r"[，,。！？!?；;\n]", text):
+        clause = clause.strip()
+        if not clause or not any(m in clause for m in HANDOFF_MARKERS):
+            continue
+        if HANDOFF_SOFT_RE.search(clause):
+            continue
+        if HANDOFF_CLAIM_RE.search(clause):
+            return True
+        if clause.startswith("转接人工客服"):
+            return True
+    return False
+
 # 方案 B：知识库无答案时，提示词只输出标记，话术统一由服务端替换。
 # 这样改一句兜底话术不用回去改 5 个提示词、也不用重新发布对话流。
 NO_ANSWER_MARKER = "[[NO_ANSWER]]"
@@ -681,29 +735,35 @@ def split_no_answer_stream(buffer: str) -> tuple[str, str]:
     return buffer, ""
 
 
-# 槽位快照 [SLOTS_JSON]{...} 是注入给扣子的助手消息，模型偶尔会把它原样回显，
-# 一旦漏给前端就成了用户可见的裸 JSON。这里在流式与整段两条路径上都剥掉。
+# 槽位快照 [SLOTS_JSON]{...} 与价格快照 [PRICE_REF]{...} 都是注入给扣子的助手消息，
+# 模型偶尔会把它们原样回显，一旦漏给前端就成了用户可见的裸 JSON 或内部价格提示。
+# 这里在流式与整段两条路径上都剥掉。
 SLOTS_SNAPSHOT_RE = re.compile(r"\[SLOTS_JSON\]\s*\{[^{}]*\}")
 _SLOTS_HEAD = "[SLOTS_JSON]"
+PRICE_SNAPSHOT_RE = re.compile(r"\[PRICE_REF\]\s*\{[^{}]*\}")
+_PRICE_HEAD = "[PRICE_REF]"
+_SNAPSHOT_HEADS = (_SLOTS_HEAD, _PRICE_HEAD)
 
 
 def split_slots_stream(buffer: str) -> tuple[str, str]:
-    """流式剥除 [SLOTS_JSON]{...}：返回 (可下发内容, 继续暂扣的尾部)。"""
+    """流式剥除 [SLOTS_JSON]{...} / [PRICE_REF]{...}：返回 (可下发内容, 暂扣尾部)。"""
     out = []
     while True:
-        idx = buffer.find(_SLOTS_HEAD)
-        if idx == -1:
-            # 尾部可能是标记的前半截，暂扣到下一块再判断
+        found = [(buffer.find(head), head) for head in _SNAPSHOT_HEADS if buffer.find(head) != -1]
+        if not found:
+            # 尾部可能是某个标记的前半截，暂扣到下一块再判断
             hold = 0
-            for size in range(min(len(buffer), len(_SLOTS_HEAD) - 1), 0, -1):
-                if _SLOTS_HEAD.startswith(buffer[-size:]):
-                    hold = size
-                    break
+            for head in _SNAPSHOT_HEADS:
+                for size in range(min(len(buffer), len(head) - 1), hold, -1):
+                    if head.startswith(buffer[-size:]):
+                        hold = size
+                        break
             if hold:
                 out.append(buffer[:-hold])
                 return "".join(out), buffer[-hold:]
             out.append(buffer)
             return "".join(out), ""
+        idx, _ = min(found, key=lambda item: item[0])
         out.append(buffer[:idx])
         rest = buffer[idx:]
         end = rest.find("}")
@@ -717,15 +777,18 @@ def split_slots_stream(buffer: str) -> tuple[str, str]:
 
 
 def strip_slots_snapshot(text: str) -> str:
-    """整段剥除槽位快照；未闭合的半截也一并丢弃。"""
+    """整段剥除槽位/价格快照；未闭合的半截也一并丢弃。"""
     text = SLOTS_SNAPSHOT_RE.sub("", text)
-    idx = text.find(_SLOTS_HEAD)
-    if idx != -1:
+    text = PRICE_SNAPSHOT_RE.sub("", text)
+    heads = [(text.find(head), head) for head in _SNAPSHOT_HEADS if text.find(head) != -1]
+    if heads:
+        idx, _ = min(heads, key=lambda item: item[0])
         text = text[:idx]
-    for size in range(min(len(text), len(_SLOTS_HEAD) - 1), 0, -1):
-        if _SLOTS_HEAD.startswith(text[-size:]):
-            text = text[:-size]
-            break
+    for head in _SNAPSHOT_HEADS:
+        for size in range(min(len(text), len(head) - 1), 0, -1):
+            if head.startswith(text[-size:]):
+                text = text[:-size]
+                break
     return text
 
 
@@ -772,6 +835,25 @@ def fact_fallback_reply(message: str) -> str:
         log_guard_event("fact_fallback_failed", error=str(exc))
         return ""
     return hit["reply"] if hit else ""
+
+
+def lookup_price_hint(message: str, context=()) -> dict | None:
+    """价格问法先查表：命中返回价格事实（单规格或该款全档）；否则 None。
+
+    只认能唯一定位的问法；未开启、表缺失、查不到一律不注入。
+    context 传最近几条用户原话（旧→新），仅用于补全省略掉的款名。
+    """
+    if not PRICE_HINT_ENABLED or PRICE_TABLE is None or not message:
+        return None
+    try:
+        hit = match_price(message, PRICE_TABLE, context)
+    except (KeyError, TypeError, ValueError) as exc:
+        log_guard_event("price_hint_failed", error=str(exc))
+        return None
+    if hit is None:
+        return None
+    hit["snapshot"] = build_price_snapshot(hit)
+    return hit
 
 
 _STREAM_BOUNDARY_RE = re.compile(r"[。！？!?；;\n，,]")
@@ -1571,6 +1653,36 @@ class Handler(BaseHTTPRequestHandler):
                     self._emit_chat_log(token, message)
                     return  # 不调用扣子
 
+        # 价格前置查数：只在本条确实是价格问法、且款名能唯一定位时命中。
+        # 款名省略时用现有会话历史里的最近用户原话补主语（不另建存储）。
+        # 注入进 additional_messages 的助手快照，不写进本地会话历史、不改用户原话；
+        # 前端可见文本由 split_slots_stream / strip_slots_snapshot 兜底剥除。
+        recent_user_texts = [
+            item.get("text", "")
+            for item in SESSIONS.history(token)
+            if item.get("role") == "user" and item.get("text")
+        ][-PRICE_CONTEXT_TURNS:]
+        price_hint = lookup_price_hint(message, recent_user_texts)
+        price_snapshot = price_hint["snapshot"] if price_hint else ""
+        if price_hint:
+            self._chat_in_tok += estimate_tokens(price_snapshot)
+            log_guard_event(
+                "price_hint",
+                product=price_hint.get("product", ""),
+                spec=price_hint.get("spec", ""),
+                price=price_hint.get("price"),
+                prices=price_hint.get("specs"),
+            )
+
+        additional_messages = [
+            {"role": "assistant", "content": slots_snapshot, "content_type": "text"},
+        ]
+        if price_snapshot:
+            additional_messages.append(
+                {"role": "assistant", "content": price_snapshot, "content_type": "text"}
+            )
+        additional_messages.append({"role": "user", "content": message, "content_type": "text"})
+
         body = {
             "bot_id": COZE_BOT_ID,
             "user_id": user_id,
@@ -1578,10 +1690,7 @@ class Handler(BaseHTTPRequestHandler):
             "auto_save_history": True,   # 保存会话，多轮才记得住上下文
             # 工作流开始节点的 SLOTS_JSON 输入（选填）：留空占位，保持兼容
             "parameters": {"SLOTS_JSON": ""},
-            "additional_messages": [
-                {"role": "assistant", "content": slots_snapshot, "content_type": "text"},
-                {"role": "user", "content": message, "content_type": "text"},
-            ],
+            "additional_messages": additional_messages,
         }
 
         # 注意：conversation_id 是 query 参数，不是请求体字段
@@ -1780,6 +1889,11 @@ class Handler(BaseHTTPRequestHandler):
                     tail = tail.replace(m, "")
                 tail = GENERIC_PLACEHOLDER_RE.sub("", tail)
                 tail = strip_slots_snapshot(tail)
+            if not sent_delta and not tail.strip():
+                # 上游只吐了换行/空白（或回显的快照被剥空）：不能原样 emit，
+                # 否则前端只剩空气泡。走兜底话术，并记 empty_reply 便于线上排查。
+                tail = fact_fallback_reply(message) or NO_ANSWER_REPLY
+                log_guard_event("empty_reply", path="stream_tail")
             for chunk in guard_stream.feed(tail):
                 emit(chunk)
             stream_pending = ""
@@ -1815,7 +1929,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._chat_guard_metric = log["metric"]
                 self._chat_guard_value = log["value"]
                 log_guard_event("numeric", path="structured", **log)
-            if reply_text:
+            if not reply_text.strip():
+                # 只含换行/空白的回复等同于空回复，走兜底话术，避免前端空白气泡
+                reply_text = fact_fallback_reply(message) or NO_ANSWER_REPLY
+                log_guard_event("empty_reply", path="structured")
+            if reply_text.strip():
                 if self._chat_ttft is None:
                     self._chat_ttft = round(time.time() - self._req_start, 2)
                 self._sse_send("delta", json.dumps({"content": reply_text}, ensure_ascii=False))
@@ -1836,7 +1954,11 @@ class Handler(BaseHTTPRequestHandler):
                 self._chat_guard_metric = log["metric"]
                 self._chat_guard_value = log["value"]
                 log_guard_event("numeric", path="completed", **log)
-            if reply_text:
+            if not reply_text.strip():
+                # 只含换行/空白的回复等同于空回复，走兜底话术，避免前端空白气泡
+                reply_text = fact_fallback_reply(message) or NO_ANSWER_REPLY
+                log_guard_event("empty_reply", path="completed")
+            if reply_text.strip():
                 if self._chat_ttft is None:
                     self._chat_ttft = round(time.time() - self._req_start, 2)
                 self._sse_send("delta", json.dumps({"content": reply_text}, ensure_ascii=False))
@@ -1864,8 +1986,9 @@ class Handler(BaseHTTPRequestHandler):
         self._sse_send("branch", json.dumps({"branch": branch}, ensure_ascii=False))
         self._chat_branch = branch
         # 转人工判定：分支标签里没有「转人工」（转接话术按内容归「其他兜底」，与评测期望一致），
-        # 是否转人工单独按回复里的转接话术判定，供日志统计与 FAQ 缓存排除
-        self._chat_handoff = any(marker in reply_text for marker in HANDOFF_MARKERS)
+        # 是否转人工单独按回复里的可信转接话术判定，供日志统计与 FAQ 缓存排除；
+        # 客套式提及（「也可转接人工客服复核」）不算，避免锁死会话。
+        self._chat_handoff = is_handoff_reply(reply_text)
 
         # 先把本轮的问答写进会话（轮次 + 最近若干轮历史），转人工时连同上下文一起入队
         SESSIONS.record_turn(token, message, reply_text, epoch)

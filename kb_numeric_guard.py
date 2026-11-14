@@ -246,8 +246,10 @@ def _apply_price_table(categories: list[dict], upload_dir: Path) -> None:
     heading = ""
     for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
-        if line.startswith("## "):
-            heading = line[3:]
+        # 只看二级标题：三级标题是拆分后的单款条目，会把「套件/被芯/枕芯/保护套」
+        # 这些分组词覆盖掉，导致价位无法回填到 02-05。
+        if line.startswith("## ") and not line.startswith("### "):
+            heading = line[3:].strip()
             continue
         if not re.match(r"-\s*答复[：:]", line):
             continue
@@ -311,10 +313,19 @@ def build_manifest(upload_dir: Path) -> dict:
                         "metrics": {},
                     }
                     products.setdefault(current["name"], current)
+                active_field = False
                 continue
             if not line.startswith("- "):
+                active_field = False
                 continue
-            if not re.match(r"-\s*(答复|数值边界|例外)[：:]", line):
+            indented = raw[:1].isspace()
+            if not indented:
+                if not re.match(r"-\s*(答复|数值边界|例外)[：:]", line):
+                    active_field = False
+                    continue
+                active_field = True
+            elif not active_field:
+                # 结构拆分后的分条续行，仍属于上一条答复/数值边界/例外
                 continue
             claims = extract_claims(line)
             if not claims:
